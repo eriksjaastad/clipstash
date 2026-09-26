@@ -148,7 +148,8 @@ and opens a local picker page where you click the best frame:
 3. The helper stores the burst session in a temp dir and opens
    `http://127.0.0.1:8787/picker/<id>` in a new tab.
 4. Click a frame; the helper writes a normal packet (image + title + URL) and
-   deletes the session.
+   deletes the session. The chosen frame also lands in the extension clipboard
+   history with the same shape as single captures.
 
 The chosen packet records `capture_method: burst_canvas`. When the canvas is
 tainted by cross-origin media (e.g. googlevideo on YouTube), the burst session

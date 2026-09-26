@@ -395,6 +395,67 @@ def test_burst_choose_missing_session_404(server):
     assert status == 404
 
 
+def test_burst_choose_enqueues_pending_history_and_drains(server):
+    status, _, body = request(
+        server_url(server, "/bursts"),
+        data=json.dumps(make_burst_payload(frame_count=1)).encode("utf-8"),
+        method="POST",
+    )
+    assert status == 201
+    session_id = json.loads(body)["session_id"]
+
+    status, _, body = request(
+        server_url(server, f"/picker/{session_id}/choose"),
+        data=json.dumps(
+            {
+                "frame_index": 0,
+                "title": "Pending history burst",
+                "source_url": "https://www.youtube.com/watch?v=burst123",
+                "site": "youtube",
+                "capture_method": "burst_canvas",
+            }
+        ).encode("utf-8"),
+        method="POST",
+    )
+    assert status == 200
+    packet = json.loads(body)["packet"]
+
+    status, _, body = request(server_url(server, "/history/pending"))
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["ok"] is True
+    assert payload["entries"] == [
+        {
+            "id": packet["id"],
+            "title": "Pending history burst",
+            "url": "https://www.youtube.com/watch?v=burst123",
+            "text": "Pending history burst\nhttps://www.youtube.com/watch?v=burst123",
+            "createdAt": packet["created_at"],
+        }
+    ]
+
+    # The endpoint drains the queue: a second GET is empty.
+    status, _, body = request(server_url(server, "/history/pending"))
+    assert status == 200
+    assert json.loads(body) == {"ok": True, "entries": []}
+
+
+def test_burst_picker_html_dispatches_chosen_event(server):
+    status, _, body = request(
+        server_url(server, "/bursts"),
+        data=json.dumps(make_burst_payload(frame_count=1)).encode("utf-8"),
+        method="POST",
+    )
+    assert status == 201
+    session_id = json.loads(body)["session_id"]
+
+    status, _, body = request(server_url(server, f"/picker/{session_id}"))
+    assert status == 200
+    html = body.decode("utf-8")
+    assert 'new CustomEvent("clipstash:chosen"' in html
+    assert "detail: payload.packet" in html
+
+
 def test_burst_session_expiry(monkeypatch):
     meta = create_burst([PNG_1PX], {"title": "t", "source_url": "https://example.com"})
     session_id = meta["session_id"]
