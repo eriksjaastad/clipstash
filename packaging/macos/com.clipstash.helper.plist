@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  Template for a per-user LaunchAgent that starts the clipstash helper at
+  login. Copy to ~/Library/LaunchAgents/com.clipstash.helper.plist and replace
+  /usr/local/bin/clipstashd below with the output of `command -v clipstashd`
+  (with the helper's virtualenv active). See docs/install.md and the README
+  "Run the helper at login" section for install/unload steps.
+-->
+<dict>
+  <key>Label</key>
+  <string>com.clipstash.helper</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/clipstashd</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>

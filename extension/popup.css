@@ -66,6 +66,12 @@ header h1 {
   font-size: 14px;
 }
 
+.helper-setup {
+  color: var(--accent);
+  font-size: 11px;
+  text-underline-offset: 2px;
+}
+
 .capture {
   margin: 10px 0;
 }
