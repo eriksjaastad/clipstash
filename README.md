@@ -61,16 +61,41 @@ curl http://127.0.0.1:8787/export.csv
 1. Open `chrome://extensions`.
 2. Enable **Developer mode** (top right).
 3. Click **Load unpacked** and select this repo's `extension/` directory.
-4. Open a YouTube video, click the clipstash toolbar icon, and press
-   **Save packet**. The still + record are written by the helper, and the
-   title + URL are copied to the clipboard and added to the history list.
+4. Open a YouTube video (or a video post on X/Twitter, Instagram, or TikTok),
+   click the clipstash toolbar icon, and press **Save packet**. The still +
+   record are written by the helper, and the title + URL are copied to the
+   clipboard and added to the history list.
 
 The popup shows whether the helper is running; start `clipstashd` first.
+
+### Site adapters
+
+| Adapter id | Sites | Notes |
+|------------|-------|-------|
+| `youtube` | youtube.com, youtu.be | canonical `watch?v=` URL, player title + time |
+| `x` | x.com, twitter.com | canonical status URL, tweet text title |
+| `instagram` | instagram.com | canonical reel/post permalink, og:title |
+| `tiktok` | tiktok.com | canonical `@user/video/id` permalink, og:title |
+| `generic` | any page | page title + URL + first `<video>` (fallback) |
+
+### Capture fallback
+
+The fast path draws the current `<video>` frame to a canvas and records
+`capture_method: canvas`. Cross-origin media (e.g. googlevideo on YouTube) can
+taint the canvas and make `toDataURL()` throw; when that happens the extension
+falls back to `chrome.tabs.captureVisibleTab` and records
+`capture_method: visible_tab`. v1 keeps the full tab as the still (no cropping
+yet) — see [ISSUES.md](./ISSUES.md) #1.
+
+Permissions stay minimal: `activeTab` is already declared and grants
+`captureVisibleTab` when the user invokes the extension from the toolbar, so the
+fallback needs no extra `tabs` or host permission.
 
 ## Tests
 
 ```bash
-python3 -m pytest
+python3 -m pytest                 # helper: packet schema, storage, HTTP API
+node scripts/smoke_extension.mjs  # extension JS: adapters + taint fallback (no browser needed)
 ```
 
 ## License
