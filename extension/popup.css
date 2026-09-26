@@ -1,0 +1,177 @@
+:root {
+  --fg: #1c1b1a;
+  --muted: #6b6560;
+  --line: #e4e0da;
+  --accent: #2f6fed;
+  --accent-ink: #ffffff;
+  --ok: #1f9d55;
+  --bad: #c0392b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  width: 340px;
+  margin: 0;
+  padding: 14px;
+  color: var(--fg);
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.subtitle {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.helper {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #faf9f7;
+  font-size: 12px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: none;
+}
+
+.dot.running {
+  background: var(--ok);
+}
+
+.dot.down {
+  background: var(--bad);
+}
+
+#helper-refresh {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.capture {
+  margin: 10px 0;
+}
+
+button {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 6px 10px;
+  background: #ffffff;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+button:hover {
+  border-color: var(--accent);
+}
+
+button.primary {
+  width: 100%;
+  padding: 9px 10px;
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.status {
+  margin: 8px 0 0;
+  color: var(--muted);
+}
+
+.status.error {
+  color: var(--bad);
+}
+
+.status.success {
+  color: var(--ok);
+}
+
+.history h2 {
+  margin: 14px 0 6px;
+  font-size: 13px;
+}
+
+.count {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+#history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+#history-list li {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 6px;
+}
+
+.entry-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entry-url {
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entry-actions {
+  margin-top: 6px;
+  display: flex;
+  gap: 6px;
+}
+
+.entry-actions button {
+  padding: 3px 8px;
+}
+
+.empty {
+  color: var(--muted);
+}
+
+footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+}
+
+footer a {
+  color: var(--accent);
+}
+
+footer .note {
+  color: var(--muted);
+}

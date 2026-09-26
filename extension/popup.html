@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>clipstash</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <h1>clipstash</h1>
+      <span class="subtitle">video still + title + URL packets</span>
+    </header>
+
+    <section class="helper">
+      <span id="helper-dot" class="dot"></span>
+      <span id="helper-text">checking helper…</span>
+      <button id="helper-refresh" title="Re-check helper">↻</button>
+    </section>
+
+    <section class="capture">
+      <button id="save-packet" class="primary">Save packet</button>
+      <p id="status" class="status" hidden></p>
+    </section>
+
+    <section class="history">
+      <h2>Clipboard history <span id="history-count" class="count"></span></h2>
+      <ul id="history-list"></ul>
+      <p id="history-empty" class="empty" hidden>No packets yet.</p>
+    </section>
+
+    <footer>
+      <a href="#" id="open-options">Options</a>
+      <span class="note">helper writes to ~/Clipstash/packets</span>
+    </footer>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
