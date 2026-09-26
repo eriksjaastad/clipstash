@@ -10,6 +10,8 @@ import urllib.request
 import pytest
 
 from helper import __version__
+from helper import bursts
+from helper.bursts import create_burst, load_session, session_dir
 from helper.packets import (
     export_csv,
     list_packets,
@@ -248,3 +250,177 @@ def test_export_csv_endpoint(server):
 def test_unknown_route_404(server):
     status, _, _ = request(server_url(server, "/nope"))
     assert status == 404
+
+
+# --------------------------------------------------------------------------
+# burst sessions + picker
+# --------------------------------------------------------------------------
+
+def make_burst_payload(frame_count=2, **overrides):
+    payload = {
+        "title": "Burst packet",
+        "source_url": "https://www.youtube.com/watch?v=burst123",
+        "page_url": "https://www.youtube.com/watch?v=burst123",
+        "site": "youtube",
+        "timestamp_sec": 42.5,
+        "capture_method": "burst_canvas",
+        "frames": [f"data:image/png;base64,{PNG_1PX_B64}" for _ in range(frame_count)],
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_create_burst_choose_frame_and_packet(server, tmp_path):
+    status, _, body = request(
+        server_url(server, "/bursts"),
+        data=json.dumps(make_burst_payload()).encode("utf-8"),
+        method="POST",
+    )
+    assert status == 201
+    payload = json.loads(body)
+    assert payload["ok"] is True
+    session_id = payload["session_id"]
+    assert payload["picker_url"] == f"http://127.0.0.1:{server.server_address[1]}/picker/{session_id}"
+    assert payload["frame_count"] == 2
+
+    # Picker page renders a grid with both frames.
+    status, content_type, body = request(server_url(server, f"/picker/{session_id}"))
+    assert status == 200
+    assert content_type == "text/html; charset=utf-8"
+    html = body.decode("utf-8")
+    assert "Burst &amp; pick" in html
+    assert f"/picker/{session_id}/frame/0" in html
+    assert f"/picker/{session_id}/frame/1" in html
+
+    # Frame bytes are served back as PNG.
+    status, content_type, body = request(
+        server_url(server, f"/picker/{session_id}/frame/1")
+    )
+    assert status == 200
+    assert content_type == "image/png"
+    assert body == PNG_1PX
+
+    # Choosing frame 1 writes a normal packet and deletes the session.
+    status, _, body = request(
+        server_url(server, f"/picker/{session_id}/choose"),
+        data=json.dumps(
+            {
+                "frame_index": 1,
+                "title": "Chosen burst frame",
+                "source_url": "https://www.youtube.com/watch?v=burst123",
+                "site": "youtube",
+                "capture_method": "burst_canvas",
+            }
+        ).encode("utf-8"),
+        method="POST",
+    )
+    assert status == 200
+    chosen = json.loads(body)
+    assert chosen["ok"] is True
+    packet = chosen["packet"]
+    assert packet["title"] == "Chosen burst frame"
+    assert packet["capture_method"] == "burst_canvas"
+    assert packet["image"] == "still.png"
+
+    # Packet is on disk under the server's packet root.
+    record = read_record(packet["id"], root=tmp_path)
+    assert record["title"] == "Chosen burst frame"
+    assert (tmp_path / packet["id"] / "still.png").read_bytes() == PNG_1PX
+
+    # Session is gone after choose.
+    status, _, _ = request(server_url(server, f"/picker/{session_id}"))
+    assert status == 404
+    status, _, _ = request(server_url(server, f"/picker/{session_id}/frame/1"))
+    assert status == 404
+
+
+def test_burst_visible_tab_capture_method_round_trip(server, tmp_path):
+    status, _, body = request(
+        server_url(server, "/bursts"),
+        data=json.dumps(
+            make_burst_payload(frame_count=1, capture_method="burst_visible_tab")
+        ).encode("utf-8"),
+        method="POST",
+    )
+    assert status == 201
+    session_id = json.loads(body)["session_id"]
+
+    status, _, body = request(
+        server_url(server, f"/picker/{session_id}/choose"),
+        data=json.dumps(
+            {
+                "frame_index": 0,
+                "title": "Fallback burst",
+                "source_url": "https://www.youtube.com/watch?v=burst123",
+                "capture_method": "burst_visible_tab",
+            }
+        ).encode("utf-8"),
+        method="POST",
+    )
+    assert status == 200
+    packet = json.loads(body)["packet"]
+    assert packet["capture_method"] == "burst_visible_tab"
+    assert read_record(packet["id"], root=tmp_path)["capture_method"] == "burst_visible_tab"
+
+
+def test_burst_requires_frames(server):
+    payload = make_burst_payload(frame_count=0)
+    status, _, body = request(
+        server_url(server, "/bursts"),
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+    )
+    assert status == 400
+    assert "frames" in json.loads(body)["error"]
+
+
+def test_burst_rejects_non_png_frames(server):
+    payload = make_burst_payload(frame_count=1)
+    payload["frames"] = ["data:image/png;base64,bm90YXBuZw=="]
+    status, _, body = request(
+        server_url(server, "/bursts"),
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+    )
+    assert status == 400
+    assert "PNG" in json.loads(body)["error"]
+
+
+def test_burst_choose_missing_session_404(server):
+    status, _, body = request(
+        server_url(server, "/picker/01JNOPE000000000000000000/choose"),
+        data=json.dumps({"frame_index": 0}).encode("utf-8"),
+        method="POST",
+    )
+    assert status == 404
+
+
+def test_burst_session_expiry(monkeypatch):
+    meta = create_burst([PNG_1PX], {"title": "t", "source_url": "https://example.com"})
+    session_id = meta["session_id"]
+    assert load_session(session_id)["frame_count"] == 1
+
+    monkeypatch.setattr(bursts, "SESSION_TTL_SECONDS", -1)
+    with pytest.raises(FileNotFoundError):
+        load_session(session_id)
+    assert not session_dir(session_id).exists()
+
+
+def test_burst_picker_escapes_metadata(server):
+    payload = make_burst_payload(frame_count=1)
+    payload["title"] = '<img src=x onerror="alert(1)">'
+    payload["source_url"] = 'https://example.com/v"</script><script>alert(2)</script>'
+    status, _, body = request(
+        server_url(server, "/bursts"),
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+    )
+    assert status == 201
+    session_id = json.loads(body)["session_id"]
+
+    status, _, body = request(server_url(server, f"/picker/{session_id}"))
+    assert status == 200
+    html = body.decode("utf-8")
+    assert '<img src=x' not in html
+    assert "&lt;img src=x" in html
+    assert "</script><script>alert(2)</script>" not in html

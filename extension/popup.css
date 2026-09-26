@@ -93,6 +93,16 @@ button.primary {
   font-weight: 600;
 }
 
+.capture button + button {
+  margin-top: 8px;
+}
+
+button.primary.secondary {
+  background: #ffffff;
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .status {
   margin: 8px 0 0;
   color: var(--muted);
