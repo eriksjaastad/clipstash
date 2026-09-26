@@ -84,8 +84,14 @@ def new_record(
     notes: str = "",
     packet_id: str | None = None,
     created_at: str | None = None,
+    capture_method: str = "canvas",
 ) -> dict[str, Any]:
-    """Build a packet record dict from PLAN.md §2."""
+    """Build a packet record dict from PLAN.md §2.
+
+    `capture_method` records how the still was produced: `canvas` (in-page
+    video frame draw) or `visible_tab` (chrome.tabs.captureVisibleTab
+    fallback for tainted canvases).
+    """
     if not title or not title.strip():
         raise ValueError("title is required")
     if not source_url or not source_url.strip():
@@ -102,6 +108,7 @@ def new_record(
         "page_url": page_url,
         "timestamp_sec": timestamp_sec,
         "site": site or "generic",
+        "capture_method": capture_method or "canvas",
         "image": IMAGE_FILENAME,
         "tags": list(tags or []),
         "notes": notes or "",
@@ -120,6 +127,7 @@ def _validate_record(record: dict[str, Any]) -> None:
     if record.get("page_url"):
         record["page_url"] = record["page_url"].strip()
     record.setdefault("site", "generic")
+    record.setdefault("capture_method", "canvas")
     record.setdefault("tags", [])
     record.setdefault("notes", "")
     record.setdefault("image", IMAGE_FILENAME)
@@ -164,6 +172,7 @@ def summarize(record: dict[str, Any]) -> dict[str, Any]:
         "page_url": record.get("page_url"),
         "timestamp_sec": record.get("timestamp_sec"),
         "site": record.get("site"),
+        "capture_method": record.get("capture_method"),
         "image": record.get("image"),
     }
 
@@ -201,6 +210,7 @@ def export_csv(root: str | Path | None = None) -> str:
         "page_url",
         "timestamp_sec",
         "site",
+        "capture_method",
         "image",
     ]
     output = io.StringIO()

@@ -2,6 +2,10 @@
 //
 // Finds the page's video via the matching site adapter, extracts packet
 // metadata, and captures the current frame to a canvas → PNG data URL.
+// If the canvas is tainted by cross-origin media (e.g. googlevideo on
+// YouTube), the script returns metadata plus `tainted: true` so background.js
+// can fall back to chrome.tabs.captureVisibleTab.
+//
 // The final expression is a Promise; chrome.scripting.executeScript waits
 // for it and returns the resolved object to background.js.
 
@@ -21,17 +25,33 @@
     await waitForVideoReady(video);
 
     const info = await adapter.extract({ document, location, video });
-    const imageDataUrl = captureFrame(video);
-
-    return {
-      ok: true,
+    const metadata = {
       title: info.title || document.title || location.href,
       sourceUrl: info.sourceUrl || location.href,
       pageUrl: location.href,
       timestampSec: typeof info.currentTime === "number" ? info.currentTime : undefined,
       site: adapter.id,
-      imageDataUrl,
     };
+
+    try {
+      return {
+        ok: true,
+        ...metadata,
+        imageDataUrl: captureFrame(video),
+        captureMethod: "canvas",
+      };
+    } catch (error) {
+      if (isCanvasTaintError(error)) {
+        return {
+          ok: false,
+          tainted: true,
+          ...metadata,
+          captureMethod: "visible_tab",
+          error: `canvas capture failed (tainted): ${error && error.message ? error.message : error}`,
+        };
+      }
+      throw error;
+    }
   } catch (error) {
     return { ok: false, error: `frame capture failed: ${error && error.message ? error.message : error}` };
   }
@@ -54,4 +74,11 @@ function captureFrame(video) {
   const ctx = canvas.getContext("2d");
   ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
   return canvas.toDataURL("image/png");
+}
+
+function isCanvasTaintError(error) {
+  return Boolean(
+    error &&
+      (error.name === "SecurityError" || /taint/i.test(String(error.message || error)))
+  );
 }
