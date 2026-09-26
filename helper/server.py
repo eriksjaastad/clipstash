@@ -12,6 +12,7 @@ Binds 127.0.0.1 only. Endpoints:
   GET  /picker/<id>         -> HTML grid of burst frames
   GET  /picker/<id>/frame/N -> PNG for frame N
   POST /picker/<id>/choose  -> write chosen frame as a normal packet
+  GET  /history/pending     -> drain pending burst-chosen history entries
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ import binascii
 import html
 import json
 import re
+import threading
 from email.parser import BytesParser
 from email.policy import default as email_policy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -141,6 +143,26 @@ def _optional_float(value: str | None) -> float | None:
         return float(value)
     except ValueError:
         return None
+
+
+def _history_entry_from_record(record: dict[str, Any]) -> dict[str, Any]:
+    """Map a packet record to the extension history entry shape.
+
+    Mirrors the entry built by the extension's ``pushHistory`` path in
+    ``background.js`` so burst-chosen packets land in history with the same
+    shape as single captures: ``{id, title, url, text, createdAt}``.
+    """
+    clipboard = record.get("clipboard") or {}
+    text = clipboard.get("text") if isinstance(clipboard, dict) else ""
+    if not text:
+        text = f"{record.get('title', '')}\n{record.get('source_url', '')}"
+    return {
+        "id": record.get("id"),
+        "title": record.get("title"),
+        "url": record.get("source_url"),
+        "text": text,
+        "createdAt": record.get("created_at"),
+    }
 
 
 # -- burst sessions -----------------------------------------------------------
@@ -298,6 +320,7 @@ def _picker_html(session_id: str, meta: dict[str, Any]) -> str:
             status.textContent = `Saved packet ${{payload.packet.id}}${{placed}}`;
             status.className = "status ok";
             document.querySelectorAll(".frame").forEach((button) => (button.disabled = true));
+            window.dispatchEvent(new CustomEvent("clipstash:chosen", {{ detail: payload.packet }}));
           }} else {{
             status.textContent = payload.error || "choose failed";
             status.className = "status err";
@@ -317,6 +340,8 @@ class ClipStashHandler(BaseHTTPRequestHandler):
     server_version = "clipstashd/" + __version__
     root: str | None = None
     photoshop_auto: bool = False
+    pending_history: list[dict[str, Any]] = []
+    pending_history_lock: threading.Lock = threading.Lock()
 
     # -- plumbing ---------------------------------------------------------
     def _send(self, status: int, body: bytes, content_type: str) -> None:
@@ -339,6 +364,16 @@ class ClipStashHandler(BaseHTTPRequestHandler):
             return b""
         return self.rfile.read(length)
 
+    def _enqueue_pending_history(self, entry: dict[str, Any]) -> None:
+        with self.pending_history_lock:
+            self.pending_history.append(entry)
+
+    def _serve_pending_history(self) -> None:
+        with self.pending_history_lock:
+            entries = list(self.pending_history)
+            self.pending_history.clear()
+        self._send_json({"ok": True, "entries": entries})
+
     # -- endpoints --------------------------------------------------------
     def do_OPTIONS(self):  # noqa: N802 (stdlib name)
         self._send(204, b"", "text/plain")
@@ -352,6 +387,8 @@ class ClipStashHandler(BaseHTTPRequestHandler):
                 self._send_json({"ok": True, "packets": list_packets(self.root)})
             elif path == "/export.csv":
                 self._send(200, export_csv(self.root).encode("utf-8"), "text/csv")
+            elif path == "/history/pending":
+                self._serve_pending_history()
             else:
                 match = re.fullmatch(r"/picker/([^/]+)", path)
                 if match:
@@ -467,6 +504,7 @@ class ClipStashHandler(BaseHTTPRequestHandler):
             _as_bool(payload.get("photoshop")) or _as_bool(meta.get("photoshop"))
         )
         record = choose_frame(session_id, frame_index, payload, root=self.root)
+        self._enqueue_pending_history(_history_entry_from_record(record))
         response: dict[str, Any] = {"ok": True, "packet": record}
         if photoshop:
             response["photoshop"] = place_in_photoshop(
@@ -511,7 +549,12 @@ def create_server(
     handler = type(
         "BoundClipStashHandler",
         (ClipStashHandler,),
-        {"root": root, "photoshop_auto": photoshop_auto},
+        {
+            "root": root,
+            "photoshop_auto": photoshop_auto,
+            "pending_history": [],
+            "pending_history_lock": threading.Lock(),
+        },
     )
     return ThreadingHTTPServer((host, port), handler)
 

@@ -21,6 +21,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const adaptersSrc = readFileSync(join(root, "extension/lib/adapters.js"), "utf8");
 const contentSrc = readFileSync(join(root, "extension/content.js"), "utf8");
 const burstSrc = readFileSync(join(root, "extension/lib/burst.js"), "utf8");
+const pickerBridgeSrc = readFileSync(join(root, "extension/lib/picker-bridge.js"), "utf8");
 
 let failures = 0;
 function check(condition, label) {
@@ -356,6 +357,52 @@ async function runBurst(url, doc) {
   check(result.ok === false, "burst.js reports non-taint capture errors");
   check(video.paused === false, "burst.js restores playing state after capture error");
   check(Math.abs(video.currentTime - 10) < 1e-9, "burst.js restores currentTime after capture error");
+}
+
+// -- picker-bridge.js: forwards clipstash:chosen to the service worker ---------
+
+{
+  const listeners = new Map();
+  const messages = [];
+  const sandbox = {
+    console,
+    window: {
+      addEventListener(name, fn) {
+        listeners.set(name, fn);
+      },
+      dispatchEvent(event) {
+        const fn = listeners.get(event.type);
+        if (fn) fn(event);
+        return true;
+      },
+    },
+    chrome: {
+      runtime: {
+        sendMessage(message) {
+          messages.push(message);
+        },
+      },
+    },
+  };
+  createContext(sandbox);
+  runInNewContext(pickerBridgeSrc, sandbox, { filename: "picker-bridge.js" });
+  check(listeners.has("clipstash:chosen"), "picker-bridge registers clipstash:chosen listener");
+
+  const packet = {
+    id: "01JBRIDGE0000000000000000",
+    title: "Bridge packet",
+    source_url: "https://example.com/v=bridge",
+    created_at: "2026-09-26T12:00:00+00:00",
+  };
+  sandbox.window.dispatchEvent({ type: "clipstash:chosen", detail: packet });
+  check(messages.length === 1, "picker-bridge sends one message per chosen event");
+  check(
+    messages[0] && messages[0].type === "APPEND_HISTORY" && messages[0].packet === packet,
+    "picker-bridge forwards packet as APPEND_HISTORY"
+  );
+
+  sandbox.window.dispatchEvent({ type: "clipstash:chosen", detail: null });
+  check(messages.length === 1, "picker-bridge ignores chosen events without a packet");
 }
 
 if (failures > 0) {

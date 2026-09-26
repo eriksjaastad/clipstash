@@ -4,6 +4,8 @@
 const HELPER_BASE = "http://127.0.0.1:8787";
 const HISTORY_KEY = "clipstashHistory";
 const HISTORY_MAX = 20;
+const PENDING_POLL_INTERVAL_MS = 1000;
+const PENDING_POLL_TIMEOUT_MS = 3 * 60 * 1000;
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   handleMessage(message)
@@ -20,7 +22,10 @@ async function handleMessage(message) {
       return captureAndSave(Boolean(message.placePhotoshop));
     case "BURST_PICK":
       return captureBurstAndOpenPicker(Boolean(message.placePhotoshop));
+    case "APPEND_HISTORY":
+      return appendHistory(message.packet);
     case "GET_HISTORY":
+      await drainPendingHistory();
       return { ok: true, history: await getHistory() };
     default:
       return { ok: false, error: `unknown message type: ${message && message.type}` };
@@ -201,6 +206,7 @@ async function captureBurstAndOpenPicker(placePhotoshop) {
   } catch (error) {
     return { ok: false, error: `opening picker tab failed: ${error}` };
   }
+  startPendingHistoryPolling();
   return { ok: true, session_id: body.session_id, picker_url: body.picker_url };
 }
 
@@ -253,14 +259,92 @@ async function savePacket(payload) {
   }
 
   const record = body.packet;
-  await pushHistory({
+  await pushHistory(historyEntryFromPacket(record));
+  return { ok: true, packet: record, photoshop: body.photoshop || null };
+}
+
+function historyEntryFromPacket(record) {
+  const clipboard = record.clipboard || {};
+  return {
     id: record.id,
     title: record.title,
     url: record.source_url,
-    text: record.clipboard ? record.clipboard.text : `${record.title}\n${record.source_url}`,
+    text: clipboard.text || `${record.title}\n${record.source_url}`,
     createdAt: record.created_at,
-  });
-  return { ok: true, packet: record, photoshop: body.photoshop || null };
+  };
+}
+
+async function appendHistory(packet) {
+  if (!packet || !packet.id || !packet.title || !packet.source_url) {
+    return { ok: false, error: "APPEND_HISTORY requires a packet with id/title/source_url" };
+  }
+  await pushHistory(historyEntryFromPacket(packet));
+  return { ok: true };
+}
+
+// Fallback path: the helper enqueues burst-chosen history entries while the
+// picker tab is open, and we drain them here. This covers the window between
+// a chosen frame and the content-script bridge (or a service-worker restart).
+async function drainPendingHistory() {
+  let response;
+  try {
+    response = await fetch(`${HELPER_BASE}/history/pending`);
+  } catch (error) {
+    return { ok: false, error: `helper unreachable: ${error}` };
+  }
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || !body.ok) {
+    return { ok: false, error: body.error || `helper returned ${response.status}` };
+  }
+  const entries = Array.isArray(body.entries) ? body.entries : [];
+  const appended = [];
+  for (const entry of entries) {
+    const normalized = normalizeHistoryEntry(entry);
+    if (normalized) {
+      await pushHistory(normalized);
+      appended.push(normalized.id);
+    }
+  }
+  return { ok: true, appended };
+}
+
+function normalizeHistoryEntry(entry) {
+  if (!entry || !entry.id || !entry.title || !entry.url) {
+    return null;
+  }
+  return {
+    id: String(entry.id),
+    title: String(entry.title),
+    url: String(entry.url),
+    text: String(entry.text || `${entry.title}\n${entry.url}`),
+    createdAt: String(entry.createdAt || ""),
+  };
+}
+
+let pendingPollTimer = null;
+
+function startPendingHistoryPolling() {
+  if (pendingPollTimer) {
+    return;
+  }
+  const deadline = Date.now() + PENDING_POLL_TIMEOUT_MS;
+  pendingPollTimer = setInterval(async () => {
+    if (Date.now() >= deadline) {
+      stopPendingHistoryPolling();
+      return;
+    }
+    const result = await drainPendingHistory();
+    if (result.ok && result.appended.length > 0) {
+      stopPendingHistoryPolling();
+    }
+  }, PENDING_POLL_INTERVAL_MS);
+}
+
+function stopPendingHistoryPolling() {
+  if (pendingPollTimer) {
+    clearInterval(pendingPollTimer);
+    pendingPollTimer = null;
+  }
 }
 
 async function getActiveTab() {
