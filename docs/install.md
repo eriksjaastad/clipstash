@@ -83,6 +83,12 @@ install and unload steps.
 Packets are written to `~/Clipstash/packets/<id>/` by default. Override with
 `CLIPSTASH_ROOT=/path/to/packets` or `clipstashd --root /path/to/packets`.
 
+You can also change the root from the extension: open the extension's
+**Options** page while the helper is running, enter a new folder, and press
+**Save root**. The helper writes `~/Clipstash/config.json` and starts saving
+new packets there immediately, even after a restart. The folder is created for
+you; old packets are never moved — they stay in the previous folder.
+
 ## Troubleshooting
 
 - **`python3: command not found`** — install Python 3.11+ from

@@ -7,8 +7,9 @@ A packet is the source of truth for one capture:
       record.yaml
 
 `record.yaml` follows PLAN.md §2. The default root is
-`~/Clipstash/packets` and can be overridden with the `CLIPSTASH_ROOT`
-environment variable or the `--root` CLI flag.
+`~/Clipstash/packets` and can be overridden with the `--root` CLI flag,
+`~/Clipstash/config.json` (see `helper.config`), or the `CLIPSTASH_ROOT`
+environment variable.
 """
 
 from __future__ import annotations
