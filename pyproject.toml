@@ -7,7 +7,7 @@ name = "clipstash-helper"
 version = "0.1.0"
 description = "Local helper for clipstash: writes video-still packets and serves the Chrome extension."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
   "PyYAML>=6.0",

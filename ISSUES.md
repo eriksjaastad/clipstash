@@ -10,3 +10,4 @@ Running list of problems deferred while shipping. Review with Erik at end of run
 | 4 | 2026-09-25 | Options | Options page documents the helper-side save root but has no UI to change it (helper-side for v1 by design). | Low | Open |
 | 5 | 2026-09-25 | Burst picker | Cross-origin `<video>` (e.g. googlevideo on YouTube) taints every burst canvas, so the burst session falls back to a single `visible_tab` frame (`capture_method: burst_visible_tab`). No multi-frame native burst on googlevideo by design. | Medium | Fixed (by design) |
 | 6 | 2026-09-25 | Burst picker | A frame chosen in the picker is written to disk by the helper, but the picker page cannot reach `chrome.storage`, so that packet is not appended to the extension clipboard history. | Low | Open |
+| 7 | 2026-09-25 | Worker | deepseek-pty --timeout 900 exited 124 mid Slice 5; commits were already clean — raise timeout for large slices or split briefs. | Low | Open |

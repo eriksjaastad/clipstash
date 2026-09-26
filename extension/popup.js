@@ -23,8 +23,10 @@ function send(message) {
 async function refreshHealth() {
   const dot = $("helper-dot");
   const text = $("helper-text");
+  const setup = $("helper-setup");
   dot.className = "dot";
   text.textContent = "checking helper…";
+  setup.hidden = true;
 
   const health = await checkHealthDirect();
   if (health && health.ok) {
@@ -32,7 +34,8 @@ async function refreshHealth() {
     text.textContent = `Helper running (v${health.version})`;
   } else {
     dot.className = "dot down";
-    text.textContent = "Helper not running — start clipstashd";
+    text.textContent = "Helper not running";
+    setup.hidden = false;
   }
 }
 

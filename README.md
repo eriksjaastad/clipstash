@@ -25,7 +25,14 @@ tests/               pytest for the helper
 
 ## Run the helper
 
-Requires Python 3.10+ and PyYAML.
+Requires Python 3.11+ and PyYAML. Full macOS setup (venv, uv, LaunchAgent):
+see [docs/install.md](./docs/install.md).
+
+```bash
+./scripts/dev_up.sh           # creates .venv, installs deps, runs in foreground
+```
+
+Or do it manually:
 
 ```bash
 pip install -r requirements.txt
@@ -55,6 +62,45 @@ CSV export:
 curl http://127.0.0.1:8787/export.csv
 # or: python3 -m helper export --root examples/packets
 ```
+
+## Run the helper at login (macOS, optional)
+
+A LaunchAgent template ships in
+[`packaging/macos/com.clipstash.helper.plist`](./packaging/macos/com.clipstash.helper.plist).
+It starts `clipstashd` when you log in.
+
+1. Find the absolute path to `clipstashd` (with the helper's venv active):
+   `command -v clipstashd`.
+2. Copy the template into place and edit `ProgramArguments` so it points at
+   that path:
+
+   ```bash
+   mkdir -p ~/Library/LaunchAgents
+   cp packaging/macos/com.clipstash.helper.plist ~/Library/LaunchAgents/
+   # edit ~/Library/LaunchAgents/com.clipstash.helper.plist
+   # replace /usr/local/bin/clipstashd with the path from step 1
+   ```
+
+3. Load it:
+
+   ```bash
+   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.clipstash.helper.plist
+   ```
+
+4. Check health:
+
+   ```bash
+   curl http://127.0.0.1:8787/health
+   ```
+
+Unload it later with:
+
+```bash
+launchctl bootout gui/$(id -u)/com.clipstash.helper
+```
+
+The job runs at login only (`RunAtLoad`); launchd does not restart it if it
+exits.
 
 ## Load the extension (unpacked, MV3)
 
@@ -93,9 +139,9 @@ fallback needs no extra `tabs` or host permission.
 
 ### Burst & pick
 
-Instead of a single Save, **Burst & pick** steps the video by small deltas
-(±0.15s × 7, centered on the current time), canvas-captures each frame, and
-opens a local picker page where you click the best frame:
+Instead of a single Save, **Burst & pick** steps the video by ±7 × 0.15s
+(up to 15 frames, centered on the current time), canvas-captures each frame,
+and opens a local picker page where you click the best frame:
 
 1. Open a video page and click the clipstash toolbar icon.
 2. Press **Burst & pick**.
