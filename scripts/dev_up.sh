@@ -65,11 +65,25 @@ deps_stamp() {
 }
 
 DEPS_STAMP="$(deps_stamp)"
-if [ ! -f "$STAMP" ] || [ "$(cat "$STAMP")" != "$DEPS_STAMP" ]; then
+
+install_deps() {
   echo "installing helper + dev deps…"
   python -m pip install --quiet --upgrade pip
   python -m pip install --quiet -e ".[dev]"
   printf '%s' "$DEPS_STAMP" > "$STAMP"
+}
+
+if [ ! -f "$STAMP" ]; then
+  # Transition from a venv created before the stamp existed: reuse an
+  # already-installed, importable helper without touching the package index,
+  # so the first offline re-run still starts.
+  if python -c "import helper" >/dev/null 2>&1 && command -v clipstashd >/dev/null 2>&1; then
+    printf '%s' "$DEPS_STAMP" > "$STAMP"
+  else
+    install_deps
+  fi
+elif [ "$(cat "$STAMP")" != "$DEPS_STAMP" ]; then
+  install_deps
 fi
 
 echo "starting clipstashd on http://127.0.0.1:8787 (Ctrl-C to stop)…"
