@@ -26,6 +26,7 @@ source_url: "https://www.youtube.com/watch?v=…"
 page_url: "https://www.youtube.com/watch?v=…"   # may equal source_url
 timestamp_sec: 142.5          # optional, when known
 site: youtube                 # adapter id
+capture_method: canvas        # canvas | visible_tab (taint fallback)
 image: still.png              # relative path
 thumb: still.thumb.jpg        # optional small preview
 tags: []
@@ -142,7 +143,7 @@ Unsupported sites: generic fallback (page title + location.href + first playing 
 |------|----------|-----|
 | **A. In-page frame** | Draw current `<video>` frame to canvas → PNG | Yes (fast path) |
 | **B. Burst via helper** | Helper downloads/streams media or receives frame blobs; ffmpeg or decoder burst; picker UI | Yes (quality path; port from precursor grab) |
-| **C. Visible-tab shot** | Last resort (includes chrome UI) | Optional fallback only |
+| **C. Visible-tab shot** | `chrome.tabs.captureVisibleTab` fallback when the canvas is tainted by cross-origin media (full tab for v1, labeled `capture_method: visible_tab`) | Yes (fallback) |
 
 Precursor lesson: browser chrome and play buttons ruin thumbs — prefer media-native frames (B) when possible; A is good enough for Twitter helpers and quick posts.
 

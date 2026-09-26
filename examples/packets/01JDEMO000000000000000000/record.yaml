@@ -5,6 +5,7 @@ source_url: https://www.youtube.com/watch?v=dQw4w9WgXcQ
 page_url: https://www.youtube.com/watch?v=dQw4w9WgXcQ
 timestamp_sec: 142.5
 site: youtube
+capture_method: canvas
 image: still.png
 tags:
 - demo

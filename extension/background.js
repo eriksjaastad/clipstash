@@ -56,23 +56,73 @@ async function captureAndSave() {
   }
 
   const captured = injection && injection[0] && injection[0].result;
-  if (!captured || !captured.ok) {
-    return { ok: false, error: (captured && captured.error) || "frame capture failed" };
+  if (!captured) {
+    return { ok: false, error: "frame capture failed" };
   }
 
-  const imageBase64 = (captured.imageDataUrl || "").includes(",")
-    ? captured.imageDataUrl.split(",", 2)[1]
-    : captured.imageDataUrl;
+  // Canvas draw of a cross-origin <video> can taint the canvas and make
+  // toDataURL() throw. The content script reports `tainted: true` with the
+  // metadata it did manage to extract, so we can fall back to a visible-tab
+  // screenshot (no new permission needed: activeTab, already declared, grants
+  // captureVisibleTab when the user invokes the extension).
+  if (captured.tainted) {
+    return captureVisibleTabAndSave(tab, captured);
+  }
 
+  if (!captured.ok) {
+    return { ok: false, error: captured.error || "frame capture failed" };
+  }
+
+  const imageBase64 = stripDataUrlPrefix(captured.imageDataUrl || "");
   const payload = {
     title: captured.title,
     source_url: captured.sourceUrl,
     page_url: captured.pageUrl || captured.sourceUrl,
     site: captured.site || "generic",
     timestamp_sec: captured.timestampSec,
+    capture_method: captured.captureMethod || "canvas",
     image_base64: imageBase64,
   };
   return savePacket(payload);
+}
+
+async function captureVisibleTabAndSave(tab, meta) {
+  let imageDataUrl;
+  try {
+    imageDataUrl = await captureVisibleTabPng(tab.windowId);
+  } catch (error) {
+    return { ok: false, error: `visible-tab fallback failed: ${error}` };
+  }
+
+  const payload = {
+    title: meta.title,
+    source_url: meta.sourceUrl,
+    page_url: meta.pageUrl || meta.sourceUrl,
+    site: meta.site || "generic",
+    timestamp_sec: meta.timestampSec,
+    capture_method: "visible_tab",
+    image_base64: stripDataUrlPrefix(imageDataUrl || ""),
+  };
+  return savePacket(payload);
+}
+
+// Callback-style wrapper: works on every Chrome MV3 build regardless of
+// whether captureVisibleTab's promise form is available.
+function captureVisibleTabPng(windowId) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.captureVisibleTab(windowId, { format: "png" }, (dataUrl) => {
+      const error = chrome.runtime.lastError;
+      if (error) {
+        reject(new Error(error.message));
+      } else {
+        resolve(dataUrl);
+      }
+    });
+  });
+}
+
+function stripDataUrlPrefix(value) {
+  return (value || "").includes(",") ? value.split(",", 2)[1] : value;
 }
 
 async function savePacket(payload) {

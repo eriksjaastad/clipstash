@@ -47,6 +47,7 @@ def _record_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
             timestamp_sec=payload.get("timestamp_sec"),
             tags=payload.get("tags") or [],
             notes=str(payload.get("notes") or ""),
+            capture_method=str(payload.get("capture_method") or "canvas"),
         )
     except KeyError as exc:
         raise ValueError(f"missing field: {exc.args[0]}") from exc
@@ -90,6 +91,7 @@ def _record_from_multipart(content_type: str, body: bytes) -> dict[str, Any]:
             timestamp_sec=_optional_float(fields.get("timestamp_sec")),
             tags=json.loads(fields.get("tags") or "[]"),
             notes=str(fields.get("notes") or ""),
+            capture_method=str(fields.get("capture_method") or "canvas"),
         )
     except KeyError as exc:
         raise ValueError(f"missing field: {exc.args[0]}") from exc

@@ -17,6 +17,7 @@ record = new_record(
     page_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
     site="youtube",
     timestamp_sec=142.5,
+    capture_method="canvas",
     tags=["demo", "synthetic"],
     notes="Synthetic example only — no real client data.",
     packet_id="01JDEMO000000000000000000",

@@ -33,6 +33,7 @@ def make_payload(**overrides):
         "page_url": "https://www.youtube.com/watch?v=abc123",
         "site": "youtube",
         "timestamp_sec": 12.5,
+        "capture_method": "canvas",
         "image_base64": PNG_1PX_B64,
     }
     payload.update(overrides)
@@ -54,11 +55,19 @@ def test_new_record_has_clipboard_pack():
     assert record["id"]
     assert record["created_at"].endswith("+00:00")
     assert record["image"] == "still.png"
+    assert record["capture_method"] == "canvas"
     assert record["clipboard"] == {
         "title": "How I edit",
         "url": "https://example.com/v=1",
         "text": "How I edit\nhttps://example.com/v=1",
     }
+
+
+def test_new_record_capture_method():
+    record = new_record(
+        "Visible tab", "https://example.com/v=1", capture_method="visible_tab"
+    )
+    assert record["capture_method"] == "visible_tab"
 
 
 def test_new_record_requires_fields():
@@ -149,12 +158,29 @@ def test_post_packet_json_and_list(server):
     assert record["title"] == "Test packet"
     assert record["site"] == "youtube"
     assert record["image"] == "still.png"
+    assert record["capture_method"] == "canvas"
 
     status, _, body = request(server_url(server, "/packets"))
     payload = json.loads(body)
     assert status == 200
     assert len(payload["packets"]) == 1
     assert payload["packets"][0]["id"] == record["id"]
+
+
+def test_post_packet_capture_method_visible_tab(server):
+    payload = make_payload(capture_method="visible_tab")
+    status, _, body = request(
+        server_url(server, "/packets"),
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+    )
+    assert status == 201
+    record = json.loads(body)["packet"]
+    assert record["capture_method"] == "visible_tab"
+
+    status, _, body = request(server_url(server, "/export.csv"))
+    header = body.decode("utf-8").splitlines()[0]
+    assert "capture_method" in header
 
 
 def test_post_packet_multipart(server):
