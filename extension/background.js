@@ -89,7 +89,7 @@ async function captureAndSave() {
 async function captureVisibleTabAndSave(tab, meta) {
   let imageDataUrl;
   try {
-    imageDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+    imageDataUrl = await captureVisibleTabPng(tab.windowId);
   } catch (error) {
     return { ok: false, error: `visible-tab fallback failed: ${error}` };
   }
@@ -104,6 +104,21 @@ async function captureVisibleTabAndSave(tab, meta) {
     image_base64: stripDataUrlPrefix(imageDataUrl || ""),
   };
   return savePacket(payload);
+}
+
+// Callback-style wrapper: works on every Chrome MV3 build regardless of
+// whether captureVisibleTab's promise form is available.
+function captureVisibleTabPng(windowId) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.captureVisibleTab(windowId, { format: "png" }, (dataUrl) => {
+      const error = chrome.runtime.lastError;
+      if (error) {
+        reject(new Error(error.message));
+      } else {
+        resolve(dataUrl);
+      }
+    });
+  });
 }
 
 function stripDataUrlPrefix(value) {
