@@ -4,7 +4,12 @@
 // canvas-captures each frame to a PNG data URL. If the canvas is tainted by
 // cross-origin media (e.g. googlevideo on YouTube), the script returns the
 // metadata plus `tainted: true` so background.js can fall back to a single
-// chrome.tabs.captureVisibleTab shot for the burst session.
+// chrome.tabs.captureVisibleTab shot for the burst session. That fallback
+// signal also carries `cropRect` — the video element's on-screen CSS box ×
+// devicePixelRatio — so the helper can crop the full-tab PNG to the video
+// rectangle. Crop caveat: letterboxed / object-fit videos may include black
+// bars inside the element box; the CSS box is the best practical crop without
+// decoding the media.
 //
 // The final expression is a Promise; chrome.scripting.executeScript waits for
 // it and returns the resolved object to background.js.
@@ -83,6 +88,7 @@
           tainted: true,
           ...metadata,
           captureMethod: "burst_visible_tab",
+          cropRect: videoCropRect(video),
           error: "burst canvas capture failed (tainted)",
         };
       }
@@ -137,6 +143,25 @@ function isCanvasTaintError(error) {
     error &&
       (error.name === "SecurityError" || /taint/i.test(String(error.message || error)))
   );
+}
+
+function videoCropRect(video) {
+  try {
+    const rect = video.getBoundingClientRect();
+    const rawDpr = window.devicePixelRatio;
+    const dpr = Number.isFinite(rawDpr) && rawDpr > 0 ? rawDpr : 1;
+    return {
+      x: rect.left,
+      y: rect.top,
+      width: rect.width,
+      height: rect.height,
+      dpr,
+    };
+  } catch (_error) {
+    // A missing rect must not break the taint fallback; the helper saves the
+    // full tab when cropRect is absent.
+    return null;
+  }
 }
 
 function seekTargets(video, center, offsets) {

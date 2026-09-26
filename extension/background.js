@@ -4,8 +4,11 @@
 // chrome.storage.local. Handles HEALTH, SAVE_PACKET (single frame capture),
 // BURST_PICK (burst capture + helper picker), APPEND_HISTORY and GET_HISTORY.
 // Talks to the local helper at http://127.0.0.1:8787. Canvas-taint falls back
-// to captureVisibleTab; burst-chosen history entries are drained from the
-// helper's pending queue so picker tabs don't need direct storage access.
+// to captureVisibleTab; the content scripts report a `cropRect` (video element
+// CSS box × devicePixelRatio) with the taint signal, which we forward as
+// `crop_rect` so the helper can crop the full-tab PNG to the video rectangle.
+// Burst-chosen history entries are drained from the helper's pending queue so
+// picker tabs don't need direct storage access.
 
 const HELPER_BASE = "http://127.0.0.1:8787";
 const HISTORY_KEY = "clipstashHistory";
@@ -77,7 +80,9 @@ async function captureAndSave(placePhotoshop) {
   // toDataURL() throw. The content script reports `tainted: true` with the
   // metadata it did manage to extract, so we can fall back to a visible-tab
   // screenshot (no new permission needed: activeTab, already declared, grants
-  // captureVisibleTab when the user invokes the extension).
+  // captureVisibleTab when the user invokes the extension). Its `cropRect`
+  // (video CSS box × devicePixelRatio) is forwarded as `crop_rect` so the
+  // helper crops the full-tab PNG to the video rectangle before saving.
   if (captured.tainted) {
     return captureVisibleTabAndSave(tab, captured, placePhotoshop);
   }
@@ -118,6 +123,9 @@ async function captureVisibleTabAndSave(tab, meta, placePhotoshop) {
     image_base64: stripDataUrlPrefix(imageDataUrl || ""),
     photoshop: placePhotoshop,
   };
+  if (meta.cropRect) {
+    payload.crop_rect = meta.cropRect;
+  }
   return savePacket(payload);
 }
 
@@ -148,7 +156,9 @@ async function captureBurstAndOpenPicker(placePhotoshop) {
 
   if (captured.tainted && !captured.ok) {
     // Canvas taint (e.g. googlevideo on YouTube): the burst session falls
-    // back to a single visible-tab shot, labeled burst_visible_tab.
+    // back to a single visible-tab shot, labeled burst_visible_tab. The
+    // content script's `cropRect` is forwarded as `crop_rect` so the helper
+    // crops that single frame to the video rectangle.
     captureMethod = "burst_visible_tab";
     metadata = {
       title: captured.title,
@@ -191,6 +201,9 @@ async function captureBurstAndOpenPicker(placePhotoshop) {
     frames,
     photoshop: placePhotoshop,
   };
+  if (captured.cropRect) {
+    payload.crop_rect = captured.cropRect;
+  }
 
   let response;
   try {

@@ -6,9 +6,9 @@
 //   - adapter selection for YouTube / X / Instagram / TikTok / generic
 //   - title + canonical source_url extraction via the adapter interface
 //   - content.js canvas path (success) and taint path (visible_tab fallback
-//     signal returned to background.js)
+//     signal returned to background.js, including cropRect)
 //   - burst.js canvas stepping (success), taint path (burst_visible_tab
-//     fallback signal), and non-seekable single-frame path
+//     fallback signal, including cropRect), and non-seekable single-frame path
 //
 // Stubs the minimal DOM surface the scripts touch; no browser needed.
 
@@ -38,6 +38,7 @@ function makeVideo() {
     videoWidth: 1280,
     videoHeight: 720,
     currentTime: 42.5,
+    getBoundingClientRect: () => ({ left: 8, top: 120, width: 640, height: 360 }),
   };
 }
 
@@ -68,6 +69,7 @@ function makeContext(url, doc) {
     URL,
     location: { href: url },
     document: doc,
+    window: { devicePixelRatio: 2 },
   };
   createContext(sandbox);
   return sandbox;
@@ -216,6 +218,15 @@ async function runContent(url, doc) {
   check(result.captureMethod === "visible_tab", "content.js signals visible_tab fallback");
   check(result.title === "Canvas test", "content.js keeps metadata on taint");
   check(result.sourceUrl === "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "content.js keeps source_url on taint");
+  check(
+    result.cropRect &&
+      result.cropRect.x === 8 &&
+      result.cropRect.y === 120 &&
+      result.cropRect.width === 640 &&
+      result.cropRect.height === 360 &&
+      result.cropRect.dpr === 2,
+    "content.js taint signal includes cropRect with x/y/width/height/dpr"
+  );
 }
 
 // -- burst.js: canvas stepping, taint fallback, non-seekable -------------------
@@ -230,6 +241,7 @@ function makeBurstVideo({ seekable = true, center = 10, paused = true } = {}) {
     seekable: seekable
       ? { length: 1, start: () => 0, end: () => 300 }
       : { length: 0, start: () => 0, end: () => 0 },
+    getBoundingClientRect: () => ({ left: 8, top: 120, width: 640, height: 360 }),
     addEventListener(name, fn) {
       if (!listeners.has(name)) listeners.set(name, []);
       listeners.get(name).push(fn);
@@ -326,6 +338,15 @@ async function runBurst(url, doc) {
   check(result.captureMethod === "burst_visible_tab", "burst.js signals burst_visible_tab fallback");
   check(result.title === "Burst test", "burst.js keeps metadata on taint");
   check(result.sourceUrl === "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "burst.js keeps source_url on taint");
+  check(
+    result.cropRect &&
+      result.cropRect.x === 8 &&
+      result.cropRect.y === 120 &&
+      result.cropRect.width === 640 &&
+      result.cropRect.height === 360 &&
+      result.cropRect.dpr === 2,
+    "burst.js taint signal includes cropRect with x/y/width/height/dpr"
+  );
 }
 
 {

@@ -15,6 +15,14 @@ Binds 127.0.0.1 only. Endpoints:
   GET  /picker/<id>/frame/N -> PNG for frame N
   POST /picker/<id>/choose  -> write chosen frame as a normal packet
   GET  /history/pending     -> drain pending burst-chosen history entries
+
+Both ``POST /packets`` and ``POST /bursts`` accept an optional ``crop_rect``
+request field (JSON object, or JSON string in multipart form data):
+``{x, y, width, height, dpr}`` in CSS viewport pixels. The extension sends it
+on tainted ``visible_tab`` / ``burst_visible_tab`` captures so the full-tab
+PNG can be cropped to the video element's on-screen rectangle before it is
+saved (see ``helper.crop``). The field is ephemeral and is never persisted
+into ``record.yaml`` or burst metadata.
 """
 
 from __future__ import annotations
@@ -49,6 +57,7 @@ from .config import (
     normalize_packet_root,
     save_config,
 )
+from .crop import apply_crop_rect
 from .packets import (
     export_csv,
     image_path as packet_image_path,
@@ -84,6 +93,19 @@ def _as_bool(value: Any) -> bool:
     return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
+def _parse_json_object(value: Any) -> dict[str, Any] | None:
+    """Parse a multipart crop_rect field (JSON string) into a dict, or None."""
+    if isinstance(value, dict):
+        return value
+    if value in (None, ""):
+        return None
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
 def _record_from_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], bytes, bool]:
     try:
         record = new_record(
@@ -99,6 +121,7 @@ def _record_from_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], bytes
     except KeyError as exc:
         raise ValueError(f"missing field: {exc.args[0]}") from exc
     image = _decode_image_b64(str(payload.get("image_base64") or ""))
+    image = apply_crop_rect(image, payload.get("crop_rect"))
     return record, image, _as_bool(payload.get("photoshop"))
 
 
@@ -131,6 +154,7 @@ def _record_from_multipart(content_type: str, body: bytes) -> tuple[dict[str, An
     image = files.get("image") or files.get("still")
     if image is None:
         image = _decode_image_b64(str(fields.get("image_base64") or ""))
+    image = apply_crop_rect(image, _parse_json_object(fields.get("crop_rect")))
     try:
         record = new_record(
             title=str(fields["title"]),
@@ -195,7 +219,10 @@ def _burst_from_payload(payload: dict[str, Any]) -> tuple[list[bytes], dict[str,
     raw_frames = payload.get("frames")
     if not isinstance(raw_frames, list) or not raw_frames:
         raise ValueError("burst requires a non-empty frames array of data URLs")
-    frames = [_decode_image_b64(str(frame)) for frame in raw_frames]
+    crop_rect = payload.get("crop_rect")
+    frames = [
+        apply_crop_rect(_decode_image_b64(str(frame)), crop_rect) for frame in raw_frames
+    ]
     metadata = _burst_metadata_from_fields(payload)
     metadata["photoshop"] = _as_bool(payload.get("photoshop"))
     return frames, metadata
@@ -221,7 +248,11 @@ def _burst_from_multipart(content_type: str, body: bytes) -> tuple[list[bytes], 
     if not file_list:
         raise ValueError("burst requires at least one frame file")
     ordered = sorted(enumerate(file_list), key=_frame_sort_key)
-    frames = [payload for _position, (_name, _filename, payload) in ordered]
+    crop_rect = _parse_json_object(parsed["fields"].get("crop_rect"))
+    frames = [
+        apply_crop_rect(payload, crop_rect)
+        for _position, (_name, _filename, payload) in ordered
+    ]
     return frames, _burst_metadata_from_fields(parsed["fields"])
 
 

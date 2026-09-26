@@ -43,8 +43,8 @@ Full stranger setup (venv, `pip install -e .` / `uv sync`, `clipstashd`, trouble
 ## Features at a glance
 
 - **Site adapters** — per-site metadata + canonical URLs (YouTube, X, Instagram, TikTok, generic fallback). Code: `extension/lib/adapters.js`.
-- **Capture fallback** — canvas capture falls back to `chrome.tabs.captureVisibleTab` when cross-origin media taints the canvas (no cropping yet, see ISSUES.md #1). Code: `extension/content.js`, `extension/background.js`.
-- **Burst & pick** — step the video ±7 × 0.15s, capture up to 15 frames, pick one in the helper-hosted picker (taint falls back to a visible-tab shot, see ISSUES.md #5). Code: `extension/lib/burst.js`, `helper/bursts.py`.
+- **Capture fallback** — canvas capture falls back to `chrome.tabs.captureVisibleTab` when cross-origin media taints the canvas; the full-tab still is cropped to the video element's on-screen rect via a `crop_rect` from the page (see ISSUES.md #1). Code: `extension/content.js`, `extension/background.js`, `helper/crop.py`.
+- **Burst & pick** — step the video ±7 × 0.15s, capture up to 15 frames, pick one in the helper-hosted picker (taint falls back to a single visible-tab shot, cropped to the video rect, see ISSUES.md #5). Code: `extension/lib/burst.js`, `helper/bursts.py`.
 - **Photoshop place mode (macOS, optional)** — hand saved stills to Photoshop via the popup checkbox, `"photoshop": true`, or `CLIPSTASH_PHOTOSHOP=1` / `serve --photoshop`. Full setup, permissions and troubleshooting: `helper/photoshop.py` docstring.
 
 ## Save root

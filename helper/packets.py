@@ -91,7 +91,10 @@ def new_record(
 
     `capture_method` records how the still was produced: `canvas` (in-page
     video frame draw) or `visible_tab` (chrome.tabs.captureVisibleTab
-    fallback for tainted canvases).
+    fallback for tainted canvases). A `visible_tab` still may be cropped to
+    the video element's on-screen rectangle before it is written when the
+    request carries a `crop_rect` (see helper.crop); the field itself is
+    ephemeral and never persisted here.
     """
     if not title or not title.strip():
         raise ValueError("title is required")
