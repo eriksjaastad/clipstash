@@ -1,6 +1,7 @@
 // clipstash popup: helper health, save packet, clipboard history re-copy.
 
 const HELPER_BASE = "http://127.0.0.1:8787";
+const PHOTOSHOP_KEY = "clipstashPhotoshop";
 
 const $ = (id) => document.getElementById(id);
 
@@ -12,12 +13,25 @@ document.addEventListener("DOMContentLoaded", () => {
     event.preventDefault();
     chrome.runtime.openOptionsPage();
   });
+  $("place-photoshop").addEventListener("change", (event) => {
+    chrome.storage.local.set({ [PHOTOSHOP_KEY]: event.target.checked });
+  });
   refreshHealth();
   loadHistory();
+  loadPhotoshopPref();
 });
 
 function send(message) {
   return chrome.runtime.sendMessage(message);
+}
+
+async function loadPhotoshopPref() {
+  const stored = await chrome.storage.local.get(PHOTOSHOP_KEY);
+  $("place-photoshop").checked = Boolean(stored[PHOTOSHOP_KEY]);
+}
+
+function placePhotoshopChecked() {
+  return Boolean($("place-photoshop").checked);
 }
 
 async function refreshHealth() {
@@ -47,13 +61,13 @@ async function onSavePacket() {
   status.className = "status";
   status.textContent = "saving…";
 
-  const response = await send({ type: "SAVE_PACKET" });
+  const response = await send({ type: "SAVE_PACKET", placePhotoshop: placePhotoshopChecked() });
   button.disabled = false;
 
   if (response && response.ok) {
     const record = response.packet;
     status.className = "status success";
-    status.textContent = `Saved ${record.id}`;
+    status.textContent = `Saved ${record.id}${photoshopSuffix(response.photoshop)}`;
     await copyText(record.clipboard ? record.clipboard.text : `${record.title}\n${record.source_url}`);
     await loadHistory();
   } else {
@@ -70,7 +84,7 @@ async function onBurstPick() {
   status.className = "status";
   status.textContent = "capturing burst…";
 
-  const response = await send({ type: "BURST_PICK" });
+  const response = await send({ type: "BURST_PICK", placePhotoshop: placePhotoshopChecked() });
   button.disabled = false;
 
   if (response && response.ok) {
@@ -80,6 +94,11 @@ async function onBurstPick() {
     status.className = "status error";
     status.textContent = (response && response.error) || "burst failed";
   }
+}
+
+function photoshopSuffix(result) {
+  if (!result) return "";
+  return result.ok ? " · Photoshop: placed" : ` · Photoshop: ${result.error || "not placed"}`;
 }
 
 async function copyText(value) {

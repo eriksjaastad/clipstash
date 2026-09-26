@@ -109,6 +109,25 @@ button.primary.secondary {
   font-weight: 600;
 }
 
+.photoshop-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.photoshop-option input {
+  margin: 0;
+}
+
+.photoshop-option em {
+  font-style: normal;
+  opacity: 0.85;
+}
+
 .status {
   margin: 8px 0 0;
   color: var(--muted);

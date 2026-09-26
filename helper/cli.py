@@ -10,6 +10,10 @@ from . import __version__
 from .packets import export_csv
 
 
+def _env_bool(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="clipstashd",
@@ -36,6 +40,12 @@ def main(argv: list[str] | None = None) -> int:
 
     serve_parser = subparsers.add_parser("serve", help="run the HTTP server (default)")
     serve_parser.set_defaults(command="serve")
+    serve_parser.add_argument(
+        "--photoshop",
+        action="store_true",
+        default=_env_bool("CLIPSTASH_PHOTOSHOP"),
+        help="place every saved packet into Photoshop after write (macOS only; default $CLIPSTASH_PHOTOSHOP)",
+    )
 
     export_parser = subparsers.add_parser("export", help="print packets as CSV and exit")
     export_parser.add_argument("--root", default=None, help="packet root directory")
@@ -50,7 +60,12 @@ def main(argv: list[str] | None = None) -> int:
 
     from .server import run_server
 
-    run_server(host=args.host, port=args.port, root=args.root)
+    run_server(
+        host=args.host,
+        port=args.port,
+        root=args.root,
+        photoshop_auto=getattr(args, "photoshop", False),
+    )
     return 0
 
 
