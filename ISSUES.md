@@ -4,7 +4,7 @@ Running list of problems deferred while shipping. Review with Erik at end of run
 
 | # | When | Area | Issue | Severity | Status |
 |---|------|------|-------|----------|--------|
-| 1 | 2026-09-25 | Extension capture | Drawing a cross-origin `<video>` (e.g. googlevideo on YouTube) to canvas may taint the canvas and make `toDataURL()` throw. Fixed with a `chrome.tabs.captureVisibleTab` fallback under the existing `activeTab` permission; remaining limitation: v1 keeps the full tab as the still (no video crop yet), labeled `capture_method: visible_tab` in the record. | Medium | Fixed (crop deferred) |
+| 1 | 2026-09-25 | Extension capture | Drawing a cross-origin `<video>` (e.g. googlevideo on YouTube) to canvas may taint the canvas and make `toDataURL()` throw. Fixed with a `chrome.tabs.captureVisibleTab` fallback under the existing `activeTab` permission; v1 initially kept the full tab as the still, labeled `capture_method: visible_tab` in the record. Crop now ships: tainted `visible_tab` / `burst_visible_tab` stills are cropped to the video element's on-screen rect (devicePixelRatio-aware `crop_rect`, helper-side Pillow crop). | Medium | Fixed |
 | 2 | 2026-09-25 | Helper install | Install docs + LaunchAgent template shipped in slice 7 (PR #4: `docs/install.md`, `packaging/macos/`, `scripts/dev_up.sh`). Homebrew formula / single-binary publish still deferred. | Low | Fixed (brew deferred) |
 | 3 | 2026-09-25 | Extension adapters | X / Instagram / TikTok adapters shipped in slice 4; all four site adapters plus the generic fallback are live now. | Low | Fixed |
 | 4 | 2026-09-25 | Options | Options page documents the helper-side save root but has no UI to change it (helper-side for v1 by design). | Low | Fixed |

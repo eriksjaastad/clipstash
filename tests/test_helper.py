@@ -1,14 +1,16 @@
-"""Tests for the clipstash helper (packet schema, storage, HTTP endpoints)."""
+"""Tests for the clipstash helper (packet schema, storage, HTTP endpoints, crop)."""
 
 from __future__ import annotations
 
 import base64
+import io
 import json
 import threading
 import urllib.request
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from helper import __version__
 from helper import bursts
@@ -19,6 +21,7 @@ from helper.config import (
     load_config,
     save_config,
 )
+from helper.crop import apply_crop_rect
 from helper.packets import (
     default_root,
     export_csv,
@@ -34,6 +37,26 @@ PNG_1PX_B64 = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
 )
 PNG_1PX = base64.b64decode(PNG_1PX_B64)
+
+GREEN = (0, 255, 0)
+RED = (255, 0, 0)
+
+
+def make_png_with_green_region(width=200, height=100, region=(10, 20, 50, 50)) -> bytes:
+    """Solid red PNG with a green rectangle at (left, top, right, bottom)."""
+    image = Image.new("RGB", (width, height), RED)
+    for x in range(region[0], region[2]):
+        for y in range(region[1], region[3]):
+            image.putpixel((x, y), GREEN)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def png_size_and_pixel(image_bytes: bytes, xy=(0, 0)):
+    with Image.open(io.BytesIO(image_bytes)) as image:
+        image.load()
+        return image.size, image.getpixel(xy)
 
 
 def make_payload(**overrides):
@@ -117,6 +140,57 @@ def test_list_and_export_csv(tmp_path):
 
 
 # --------------------------------------------------------------------------
+# crop_rect (tainted visible_tab stills)
+# --------------------------------------------------------------------------
+
+def test_apply_crop_rect_unit_css_pixels():
+    png = make_png_with_green_region()
+    cropped = apply_crop_rect(
+        png, {"x": 10, "y": 20, "width": 40, "height": 30, "dpr": 1}
+    )
+    assert png_size_and_pixel(cropped, (0, 0)) == ((40, 30), GREEN)
+    assert png_size_and_pixel(cropped, (39, 29))[1] == GREEN
+
+
+def test_apply_crop_rect_device_pixel_ratio():
+    png = make_png_with_green_region(region=(10, 10, 50, 30))
+    cropped = apply_crop_rect(
+        png, {"x": 5, "y": 5, "width": 20, "height": 10, "dpr": 2}
+    )
+    # device box: left=10, top=10, right=50, bottom=30
+    assert png_size_and_pixel(cropped, (0, 0)) == ((40, 20), GREEN)
+    assert png_size_and_pixel(cropped, (39, 19))[1] == GREEN
+
+
+def test_apply_crop_rect_invalid_rects_return_original_bytes():
+    png = make_png_with_green_region()
+    invalid_rects = [
+        None,
+        "garbage",
+        [],
+        {},
+        {"x": None, "y": 0, "width": 10, "height": 10},
+        {"x": "a", "y": 0, "width": 10, "height": 10},
+        {"x": float("nan"), "y": 0, "width": 10, "height": 10},
+        {"x": -1000, "y": -1000, "width": 10, "height": 10},
+        {"x": 5000, "y": 5000, "width": 10, "height": 10},
+        {"x": 0, "y": 0, "width": 0, "height": 10},
+        {"x": 0, "y": 0, "width": -5, "height": 10},
+    ]
+    for crop_rect in invalid_rects:
+        assert apply_crop_rect(png, crop_rect) == png, f"rect {crop_rect!r}"
+
+
+def test_apply_crop_rect_bad_dpr_falls_back_to_1():
+    png = make_png_with_green_region()
+    for dpr in (None, 0, -2, float("inf"), float("nan"), "abc"):
+        cropped = apply_crop_rect(
+            png, {"x": 0, "y": 0, "width": 10, "height": 10, "dpr": dpr}
+        )
+        assert png_size_and_pixel(cropped, (0, 0)) == ((10, 10), RED)
+
+
+# --------------------------------------------------------------------------
 # HTTP endpoints
 # --------------------------------------------------------------------------
 
@@ -195,8 +269,46 @@ def test_post_packet_capture_method_visible_tab(server):
     assert "capture_method" in header
 
 
-def test_post_packet_multipart(server):
+def test_post_packet_visible_tab_crop_rect_crops_still(server, tmp_path):
+    png = make_png_with_green_region()
+    payload = make_payload(
+        capture_method="visible_tab",
+        image_base64=base64.b64encode(png).decode("ascii"),
+        crop_rect={"x": 10, "y": 20, "width": 40, "height": 30, "dpr": 1},
+    )
+    status, _, body = request(
+        server_url(server, "/packets"),
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+    )
+    assert status == 201
+    record = json.loads(body)["packet"]
+    still = (tmp_path / record["id"] / "still.png").read_bytes()
+    assert png_size_and_pixel(still, (0, 0)) == ((40, 30), GREEN)
+    # crop_rect is an ephemeral request field, never persisted.
+    assert "crop_rect" not in read_record(record["id"], root=tmp_path)
+
+
+def test_post_packet_visible_tab_without_crop_rect_keeps_full_still(server, tmp_path):
+    png = make_png_with_green_region()
+    payload = make_payload(
+        capture_method="visible_tab",
+        image_base64=base64.b64encode(png).decode("ascii"),
+    )
+    status, _, body = request(
+        server_url(server, "/packets"),
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+    )
+    assert status == 201
+    record = json.loads(body)["packet"]
+    still = (tmp_path / record["id"] / "still.png").read_bytes()
+    assert png_size_and_pixel(still, (0, 0)) == ((200, 100), RED)
+
+
+def test_post_packet_multipart(server, tmp_path):
     boundary = "clipstash-test-boundary"
+    crop_rect = {"x": 10, "y": 20, "width": 40, "height": 30, "dpr": 1}
     parts = [
         f"--{boundary}",
         'Content-Disposition: form-data; name="title"',
@@ -211,12 +323,16 @@ def test_post_packet_multipart(server):
         "",
         "generic",
         f"--{boundary}",
+        'Content-Disposition: form-data; name="crop_rect"',
+        "",
+        json.dumps(crop_rect),
+        f"--{boundary}",
         'Content-Disposition: form-data; name="image"; filename="still.png"',
         "Content-Type: image/png",
         "",
     ]
     body = ("\r\n".join(parts) + "\r\n").encode("utf-8")
-    body += PNG_1PX + f"\r\n--{boundary}--\r\n".encode("utf-8")
+    body += make_png_with_green_region() + f"\r\n--{boundary}--\r\n".encode("utf-8")
     content_type = f"multipart/form-data; boundary={boundary}"
 
     req = urllib.request.Request(
@@ -230,6 +346,8 @@ def test_post_packet_multipart(server):
         payload = json.loads(resp.read())
     assert payload["packet"]["title"] == "Multipart packet"
     assert payload["packet"]["source_url"] == "https://example.com/multi"
+    still = (tmp_path / payload["packet"]["id"] / "still.png").read_bytes()
+    assert png_size_and_pixel(still, (0, 0)) == ((40, 30), GREEN)
 
 
 def test_post_packet_requires_image(server):
@@ -454,6 +572,47 @@ def test_burst_visible_tab_capture_method_round_trip(server, tmp_path):
     assert status == 200
     packet = json.loads(body)["packet"]
     assert packet["capture_method"] == "burst_visible_tab"
+    assert read_record(packet["id"], root=tmp_path)["capture_method"] == "burst_visible_tab"
+
+
+def test_burst_visible_tab_crop_rect_crops_frame_and_chosen_packet(server, tmp_path):
+    png = make_png_with_green_region()
+    payload = make_burst_payload(
+        frame_count=1,
+        capture_method="burst_visible_tab",
+        frames=[f"data:image/png;base64,{base64.b64encode(png).decode('ascii')}"],
+        crop_rect={"x": 10, "y": 20, "width": 40, "height": 30, "dpr": 1},
+    )
+    status, _, body = request(
+        server_url(server, "/bursts"),
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+    )
+    assert status == 201
+    session_id = json.loads(body)["session_id"]
+
+    # The single fallback frame served to the picker is already cropped.
+    status, _, body = request(server_url(server, f"/picker/{session_id}/frame/0"))
+    assert status == 200
+    assert png_size_and_pixel(body, (0, 0)) == ((40, 30), GREEN)
+
+    # Choosing it writes the cropped still as the packet.
+    status, _, body = request(
+        server_url(server, f"/picker/{session_id}/choose"),
+        data=json.dumps(
+            {
+                "frame_index": 0,
+                "title": "Cropped burst fallback",
+                "source_url": "https://www.youtube.com/watch?v=burst123",
+                "capture_method": "burst_visible_tab",
+            }
+        ).encode("utf-8"),
+        method="POST",
+    )
+    assert status == 200
+    packet = json.loads(body)["packet"]
+    still = (tmp_path / packet["id"] / "still.png").read_bytes()
+    assert png_size_and_pixel(still, (0, 0)) == ((40, 30), GREEN)
     assert read_record(packet["id"], root=tmp_path)["capture_method"] == "burst_visible_tab"
 
 
