@@ -1,0 +1,221 @@
+// Dependency-free smoke test for the extension JS, runnable without Chrome.
+//
+// Usage: node scripts/smoke_extension.mjs
+//
+// Covers:
+//   - adapter selection for YouTube / X / Instagram / TikTok / generic
+//   - title + canonical source_url extraction via the adapter interface
+//   - content.js canvas path (success) and taint path (visible_tab fallback
+//     signal returned to background.js)
+//
+// Stubs the minimal DOM surface the scripts touch; no browser needed.
+
+import { readFileSync } from "node:fs";
+import { createContext, runInNewContext } from "node:vm";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const adaptersSrc = readFileSync(join(root, "extension/lib/adapters.js"), "utf8");
+const contentSrc = readFileSync(join(root, "extension/content.js"), "utf8");
+
+let failures = 0;
+function check(condition, label) {
+  if (condition) {
+    console.log(`ok   ${label}`);
+  } else {
+    failures += 1;
+    console.error(`FAIL ${label}`);
+  }
+}
+
+function makeVideo() {
+  return {
+    videoWidth: 1280,
+    videoHeight: 720,
+    currentTime: 42.5,
+  };
+}
+
+// Minimal querySelector supporting the selectors used by the adapters.
+function makeDocument({ title, ogTitle, tweetText, video }) {
+  const nodes = new Map([
+    ["video", video || null],
+    ["article video", video || null],
+    ["video.html5-main-video", video || null],
+    ['article [data-testid="tweetText"]', tweetText ? { textContent: tweetText } : null],
+    ['meta[property="og:title"]', ogTitle ? { getAttribute: () => ogTitle } : null],
+  ]);
+  return {
+    title,
+    querySelector(selector) {
+      return nodes.get(selector) ?? null;
+    },
+  };
+}
+
+function makeContext(url, doc) {
+  const sandbox = {
+    console,
+    setTimeout,
+    clearTimeout,
+    Date,
+    Promise,
+    URL,
+    location: { href: url },
+    document: doc,
+  };
+  createContext(sandbox);
+  return sandbox;
+}
+
+function loadAdapters(sandbox) {
+  // The script's final expression is the assignment to globalThis.ClipStashAdapters,
+  // so runInNewContext returns the adapter registry object directly.
+  return runInNewContext(adaptersSrc, sandbox, { filename: "adapters.js" });
+}
+
+// -- adapter selection -----------------------------------------------------
+
+{
+  const sandbox = makeContext("https://www.youtube.com/watch?v=dQw4w9WgXcQ", makeDocument({}));
+  const adapters = loadAdapters(sandbox);
+  const cases = [
+    ["https://www.youtube.com/watch?v=dQw4w9WgXcQ", "youtube"],
+    ["https://youtu.be/dQw4w9WgXcQ", "youtube"],
+    ["https://x.com/someone/status/1234567890123456789", "x"],
+    ["https://twitter.com/someone/status/1234567890123456789", "x"],
+    ["https://www.instagram.com/reel/CxYz123/", "instagram"],
+    ["https://www.instagram.com/p/CxYz123/", "instagram"],
+    ["https://www.tiktok.com/@someone/video/7300000000000000000", "tiktok"],
+    ["https://example.com/watch?v=1", "generic"],
+  ];
+  for (const [url, expected] of cases) {
+    check(adapters.adapt(url).id === expected, `adapt ${url} -> ${expected}`);
+  }
+}
+
+// -- adapter extraction ----------------------------------------------------
+
+async function extractFor(url, doc) {
+  const sandbox = makeContext(url, doc);
+  const adapters = loadAdapters(sandbox);
+  const adapter = adapters.adapt(url);
+  return adapter.extract({ document: doc, location: { href: url }, video: doc.querySelector("video") || undefined });
+}
+
+{
+  const video = makeVideo();
+  const doc = makeDocument({ title: "How I edit thumbnails - YouTube", video });
+  const info = await extractFor("https://youtu.be/dQw4w9WgXcQ", doc);
+  check(info.sourceUrl === "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "youtube canonical source_url");
+  check(info.title === "How I edit thumbnails", "youtube title strips - YouTube");
+  check(info.currentTime === 42.5, "youtube currentTime");
+}
+
+{
+  const video = makeVideo();
+  const doc = makeDocument({
+    title: "Post by someone on X",
+    tweetText: "This is the tweet text / X",
+    video,
+  });
+  const info = await extractFor("https://x.com/someone/status/1234567890123456789?s=20", doc);
+  check(info.sourceUrl === "https://x.com/someone/status/1234567890123456789", "x canonical source_url");
+  check(info.title === "This is the tweet text", "x title prefers tweet text");
+  check(info.currentTime === 42.5, "x currentTime");
+}
+
+{
+  const video = makeVideo();
+  const doc = makeDocument({ title: "Fallback page title", ogTitle: "Reel by creator on Instagram", video });
+  const info = await extractFor("https://www.instagram.com/reel/CxYz123/?utm_source=x", doc);
+  check(info.sourceUrl === "https://www.instagram.com/reel/CxYz123/", "instagram canonical source_url");
+  check(info.title === "Reel by creator", "instagram title from og:title");
+  check(info.currentTime === 42.5, "instagram currentTime");
+}
+
+{
+  const video = makeVideo();
+  const doc = makeDocument({ title: "Fallback page title", ogTitle: "someone on TikTok", video });
+  const info = await extractFor("https://www.tiktok.com/@someone/video/7300000000000000000", doc);
+  check(info.sourceUrl === "https://www.tiktok.com/@someone/video/7300000000000000000", "tiktok canonical source_url");
+  check(info.title === "someone", "tiktok title from og:title");
+  check(info.currentTime === 42.5, "tiktok currentTime");
+}
+
+{
+  const video = makeVideo();
+  const doc = makeDocument({ title: "Generic page", video });
+  const info = await extractFor("https://example.com/watch?v=1", doc);
+  check(info.title === "Generic page", "generic title from document.title");
+  check(info.sourceUrl === "https://example.com/watch?v=1", "generic source_url is page URL");
+}
+
+// -- content.js: canvas success and taint fallback ---------------------------
+
+function makeCanvasDoc(video, { taint } = {}) {
+  const nodes = new Map([
+    ["video", video],
+    ["video.html5-main-video", null],
+    ["article video", null],
+  ]);
+  const document = {
+    title: "Canvas test - YouTube",
+    querySelector(selector) {
+      return nodes.get(selector) ?? null;
+    },
+    createElement(tag) {
+      if (tag !== "canvas") throw new Error(`unexpected createElement(${tag})`);
+      const canvas = {
+        width: 0,
+        height: 0,
+        getContext() {
+          return {
+            drawImage() {
+              if (taint) {
+                const error = new Error("The canvas has been tainted by cross-origin data.");
+                error.name = "SecurityError";
+                throw error;
+              }
+            },
+          };
+        },
+        toDataURL() {
+          if (taint) throw new Error("Tainted canvases may not be exported.");
+          return "data:image/png;base64,AAAA";
+        },
+      };
+      return canvas;
+    },
+  };
+  return document;
+}
+
+async function runContent(url, doc) {
+  const sandbox = makeContext(url, doc);
+  loadAdapters(sandbox);
+  return runInNewContext(contentSrc, sandbox, { filename: "content.js" });
+}
+
+{
+  const result = await runContent("https://www.youtube.com/watch?v=dQw4w9WgXcQ", makeCanvasDoc(makeVideo()));
+  check(result.ok === true, "content.js canvas path succeeds");
+  check(result.captureMethod === "canvas", "content.js labels canvas capture");
+  check(result.site === "youtube", "content.js uses youtube adapter");
+  check(result.imageDataUrl === "data:image/png;base64,AAAA", "content.js returns image data URL");
+}
+
+{
+  const result = await runContent("https://www.youtube.com/watch?v=dQw4w9WgXcQ", makeCanvasDoc(makeVideo(), { taint: true }));
+  check(result.ok === false && result.tainted === true, "content.js reports tainted canvas");
+  check(result.captureMethod === "visible_tab", "content.js signals visible_tab fallback");
+  check(result.title === "Canvas test", "content.js keeps metadata on taint");
+  check(result.sourceUrl === "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "content.js keeps source_url on taint");
+}
+
+if (failures > 0) {
+  console.error(`\n${failures} smoke check(s) failed`);
+  process.exit(1);
+}
+console.log("\nall extension smoke checks passed");
