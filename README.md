@@ -51,6 +51,10 @@ Full stranger setup (venv, `pip install -e .` / `uv sync`, `clipstashd`, trouble
 
 Packets default to `~/Clipstash/packets`. Change the root from the extension **Options** page (writes `~/Clipstash/config.json`) or with `--root` / `CLIPSTASH_ROOT`; the resolution order lives in `helper/config.py` and `clipstashd --help`.
 
+## Documentation
+
+What a piece of code **does** is documented next to that code and tested against it; why/how we work stays in markdown (PLAN.md, ISSUES.md). `clipstashd --help` is generated from `helper/cli.py`'s module docstring, `helper/photoshop.py` and `helper/config.py` carry their behaviour in their module docstrings, and drift-guard tests (`tests/test_cli_docs.py`, `tests/test_photoshop_docs.py`, `tests/test_config_docs.py`) fail when docs and code disagree. This README is pointers, not a second `--help`.
+
 ## Tests
 
 ```bash

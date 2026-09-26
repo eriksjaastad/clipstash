@@ -1,17 +1,54 @@
-"""Command-line entry points for the clipstash helper."""
+"""clipstashd — local clipstash helper: write packets and serve the extension.
 
-from __future__ import annotations
+clipstashd is the local helper for the clipstash Chrome extension. It
+writes video-still packets to disk, serves the HTTP API the extension
+talks to, and can optionally hand every saved still to Photoshop (macOS
+only).
 
-import argparse
-import os
-import sys
+Commands
+--------
+serve (default)
+    Run the HTTP server for the extension. ``serve`` is the default
+    command: running ``clipstashd`` with no command is the same as
+    ``clipstashd serve``.
 
-from . import __version__
-from .config import effective_packet_root
-from .packets import export_csv
+    ``serve --photoshop``
+        Place every saved packet into Photoshop after write (macOS only;
+        default ``$CLIPSTASH_PHOTOSHOP``).
 
-_EPILOG = """\
-setup
+export
+    Print packets as CSV to stdout and exit.
+
+    ``export --root``
+        Packet root directory (default ``$CLIPSTASH_ROOT``, then
+        ``~/Clipstash/packets``).
+
+Options
+-------
+``--host``
+    Bind address (loopback only; default 127.0.0.1).
+``--port``
+    Port to listen on (default 8787 or ``$CLIPSTASH_PORT``).
+``--root``
+    Packet root directory (default ``~/Clipstash/packets`` or
+    ``$CLIPSTASH_ROOT``).
+``--version``
+    Print the clipstashd version and exit.
+
+Environment
+-----------
+CLIPSTASH_PORT      default for ``--port`` when set.
+CLIPSTASH_ROOT      default packet root when set.
+CLIPSTASH_PHOTOSHOP enable auto-place when set to 1/true/yes/on, same as
+                    ``serve --photoshop``.
+
+Save root
+---------
+Packets default to ``~/Clipstash/packets``. Change the root from the
+extension Options page (writes ``~/Clipstash/config.json``) or with
+``--root`` / ``CLIPSTASH_ROOT``.
+
+Setup
 -----
 Requires macOS 12+, Python 3.11+, and Chrome (for the unpacked extension).
 
@@ -29,11 +66,8 @@ Health check:
 Extension:
   chrome://extensions → Developer mode → Load unpacked → choose extension/.
 
-Save root:
-  Default ~/Clipstash/packets. Change it from the extension Options page
-  (writes ~/Clipstash/config.json) or with --root / CLIPSTASH_ROOT.
-
-Troubleshooting:
+Troubleshooting
+---------------
   python3 not found         install Python 3.11+ (python.org or Homebrew)
   port 8787 already in use  another clipstashd is running; stop it first
   popup shows not running   check http://127.0.0.1:8787/health in Chrome and
@@ -42,16 +76,26 @@ Troubleshooting:
                             after `uv sync`
 """
 
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+
+from . import __version__
+from .config import effective_packet_root
+from .packets import export_csv
+
 
 def _env_bool(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """Build the clipstashd CLI parser. The module docstring is the description."""
     parser = argparse.ArgumentParser(
         prog="clipstashd",
-        description="Local clipstash helper: write packets and serve the extension.",
-        epilog=_EPILOG,
+        description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--version", action="version", version=f"clipstashd {__version__}")
@@ -86,7 +130,11 @@ def main(argv: list[str] | None = None) -> int:
     export_parser.add_argument("--root", default=None, help="packet root directory")
     export_parser.set_defaults(command="export")
 
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     command = args.command or "serve"
 
     if command == "export":

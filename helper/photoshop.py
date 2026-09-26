@@ -74,6 +74,17 @@ Photoshop running but no open document
       ``com.adobe.Photoshop``; install Photoshop (feature is optional).
 All scripts fail to compile against this Photoshop version
     → ``photoshop_unsupported`` — non-blocking; see ISSUES.md.
+``osascript`` exits 0 but prints no recognised marker
+    → ``photoshop_unexpected_output`` — unexpected osascript output; report it.
+``osascript`` fails for any other reason
+    → ``photoshop_osascript_failed`` — generic osascript failure (not
+      automation, timeout, or missing document).
+Not macOS
+    → ``unsupported_platform`` — feature is macOS-only; no Windows support.
+Image file missing on disk
+    → ``missing_image`` — the PNG was not written or was moved before place.
+``osascript`` not found
+    → ``osascript_missing`` — macOS-only feature; osascript ships with macOS.
 Save works but ``photoshop.method: "open"``
     → the still opened as a new document instead of embedding — expected when
       the installed version has no place/duplicate path.
