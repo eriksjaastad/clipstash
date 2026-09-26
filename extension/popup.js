@@ -1,4 +1,8 @@
-// clipstash popup: helper health, save packet, clipboard history re-copy.
+// clipstash popup.
+//
+// Helper health dot + refresh, Save packet and Burst & pick buttons (both
+// carry the "Also place in Photoshop" checkbox flag), clipboard history list
+// with per-entry Title/URL/Both re-copy, and a link to the options page.
 
 const HELPER_BASE = "http://127.0.0.1:8787";
 const PHOTOSHOP_KEY = "clipstashPhotoshop";

@@ -1,5 +1,11 @@
 // clipstash MV3 service worker.
-// Talks to the local helper and owns chrome.storage.local clipboard history.
+//
+// Message hub for the popup/picker and owner of the clipboard history in
+// chrome.storage.local. Handles HEALTH, SAVE_PACKET (single frame capture),
+// BURST_PICK (burst capture + helper picker), APPEND_HISTORY and GET_HISTORY.
+// Talks to the local helper at http://127.0.0.1:8787. Canvas-taint falls back
+// to captureVisibleTab; burst-chosen history entries are drained from the
+// helper's pending queue so picker tabs don't need direct storage access.
 
 const HELPER_BASE = "http://127.0.0.1:8787";
 const HISTORY_KEY = "clipstashHistory";

@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 # One-command clipstash helper dev environment.
 #
-# Creates .venv if it doesn't exist (Python 3.11+), installs the helper plus
-# dev/test deps when the dependency spec changes, and runs the helper in the
-# foreground (Ctrl-C stops it). Re-running skips the pip install when the
-# virtualenv is already current, so it also works offline.
+# Stranger setup in one shot: clone the repo, then run this script. It creates
+# .venv if it doesn't exist (Python 3.11+), installs the helper plus dev/test
+# deps when the dependency spec changes, and runs the helper in the foreground
+# (Ctrl-C stops it). Re-running skips the pip install when the virtualenv is
+# already current, so it also works offline.
+#
+# Requirements: macOS 12+, Python 3.11+, Chrome. For the full setup story
+# (venv + `pip install -e .` or `uv sync`, running via `python -m helper` /
+# `clipstashd`, loading the unpacked extension/, changing the save root) see
+# `clipstashd --help`. LaunchAgent install/unload steps live in the comments of
+# packaging/macos/com.clipstash.helper.plist.
 #
 # Usage:
 #   ./scripts/dev_up.sh

@@ -4,26 +4,79 @@ After a packet is written, the still can be handed to Photoshop over Apple
 Events. This module generates and runs small AppleScripts through ``osascript``
 and never imports or requires Photoshop — every failure is converted into a
 clear JSON-shaped dict so callers (and the HTTP layer) never crash.
+``place_in_photoshop()`` returns structured JSON-shaped dicts for every outcome
+and never raises for Photoshop-side failures. macOS-only: no Windows support.
 
-Version note: modern Photoshop releases (2025/2026) removed the ``place``
-AppleEvent from their scripting dictionary, so this module tries three scripts
-in order and falls back gracefully:
+Enabling
+--------
+Any one of:
 
-  1. ``place``  — legacy Photoshop (CS/CC through ~2021): places the PNG file
-                  directly into the frontmost document.
+* Extension popup — tick "Also place in Photoshop" (default off; remembered in
+  ``chrome.storage.local`` and applied to both Save packet and Burst & pick).
+* Per request — send ``"photoshop": true`` in the ``POST /packets`` or
+  ``POST /bursts`` JSON body.
+* Helper config — ``CLIPSTASH_PHOTOSHOP=1`` before launch, or
+  ``clipstashd serve --photoshop``, to place every saved packet automatically.
+
+A saved packet can be re-placed manually with
+``POST /packets/<id>/place-photoshop``. The packet save itself always succeeds:
+when placement was requested, the outcome is returned in an extra ``photoshop``
+field and never raises for Photoshop-side failures.
+
+Placement scripts
+-----------------
+Modern Photoshop releases (2025/2026) removed the ``place`` AppleEvent from
+their scripting dictionary, so this module tries three scripts in order and
+falls back gracefully:
+
+  1. ``place``     — legacy Photoshop (CS/CC through ~2021): places the PNG
+                     file directly into the frontmost document.
   2. ``duplicate`` — modern Photoshop: opens the PNG as a document, duplicates
-                  its art layers into the frontmost document, closes the temp
-                  document. This keeps the "drop into open PS doc" behaviour.
-  3. ``open``   — last resort: open the PNG as a new document in Photoshop.
+                     its art layers into the frontmost document, closes the
+                     temp document. This keeps the "drop into open PS doc"
+                     behaviour.
+  3. ``open``      — last resort: opens the PNG as a new document in Photoshop
+                     (reported as ``method: "open"`` — expected when the
+                     installed version has no place/duplicate path).
 
 Scripts receive the image path via ``on run argv`` (never string-interpolated),
-so paths with quotes/spaces are safe.
+so paths with quotes/spaces are safe. Each script is allowed up to 120 s; a
+busy Photoshop reports a timeout instead of hanging.
 
-Configuration
--------------
-``CLIPSTASH_PHOTOSHOP=1`` (or the ``--photoshop`` serve flag) tells the helper
-to place every saved packet automatically. Otherwise callers opt in per request
-with ``photoshop: true`` or use ``POST /packets/{id}/place-photoshop``.
+macOS permissions (TCC / Automation)
+------------------------------------
+The first time the helper tells Photoshop what to do, macOS asks whether the
+launching app (e.g. Terminal, or the LaunchAgent's ``clipstashd``) may control
+"Adobe Photoshop". Click OK — otherwise ``osascript`` fails with an
+"not authorized" / ``-1743`` error and the helper reports
+``photoshop_automation_denied``. Check or reset consent under System Settings →
+Privacy & Security → Automation (delete the entry and trigger a place again to
+re-prompt). For a LaunchAgent, grant Automation to the program named in the
+plist (``clipstashd``), or start ``clipstashd`` from Terminal once to approve
+Terminal.
+
+Troubleshooting
+---------------
+Symptom → reason → fix (compact):
+
+Photoshop isn't running
+    → ``photoshop_not_running`` — launch Photoshop, open a document, retry.
+Photoshop running but no open document
+    → ``photoshop_no_document`` — open/create a document, retry.
+``-1743`` / "not authorized"
+    → ``photoshop_automation_denied`` — macOS Automation consent missing; see
+      permissions above.
+``AppleEvent timed out``
+    → ``photoshop_timeout`` — Photoshop is busy (modal dialog, hung plug-in)
+      or its scripting interface is slow; dismiss dialogs / restart, retry.
+``-1728`` / Photoshop not found
+    → ``photoshop_not_installed`` — no app with bundle id
+      ``com.adobe.Photoshop``; install Photoshop (feature is optional).
+All scripts fail to compile against this Photoshop version
+    → ``photoshop_unsupported`` — non-blocking; see ISSUES.md.
+Save works but ``photoshop.method: "open"``
+    → the still opened as a new document instead of embedding — expected when
+      the installed version has no place/duplicate path.
 """
 
 from __future__ import annotations
@@ -366,6 +419,6 @@ def place_in_photoshop(
 
 
 def quoted_command_for_script(script_name: str, image_path: str | Path) -> str:
-    """Human-readable shell command for a single script (docs/tests)."""
+    """Human-readable shell command for a single script (tests/debugging)."""
     script = _script_by_name(script_name)
     return " ".join(shlex.quote(part) for part in _command_for(script, Path(image_path)))
