@@ -17,9 +17,9 @@ async function handleMessage(message) {
     case "HEALTH":
       return checkHealth();
     case "SAVE_PACKET":
-      return captureAndSave();
+      return captureAndSave(Boolean(message.placePhotoshop));
     case "BURST_PICK":
-      return captureBurstAndOpenPicker();
+      return captureBurstAndOpenPicker(Boolean(message.placePhotoshop));
     case "GET_HISTORY":
       return { ok: true, history: await getHistory() };
     default:
@@ -41,7 +41,7 @@ async function checkHealth() {
   }
 }
 
-async function captureAndSave() {
+async function captureAndSave(placePhotoshop) {
   const tab = await getActiveTab();
   if (!tab || !/^https?:/.test(tab.url || "")) {
     return { ok: false, error: "active tab is not a http(s) page" };
@@ -68,7 +68,7 @@ async function captureAndSave() {
   // screenshot (no new permission needed: activeTab, already declared, grants
   // captureVisibleTab when the user invokes the extension).
   if (captured.tainted) {
-    return captureVisibleTabAndSave(tab, captured);
+    return captureVisibleTabAndSave(tab, captured, placePhotoshop);
   }
 
   if (!captured.ok) {
@@ -84,11 +84,12 @@ async function captureAndSave() {
     timestamp_sec: captured.timestampSec,
     capture_method: captured.captureMethod || "canvas",
     image_base64: imageBase64,
+    photoshop: placePhotoshop,
   };
   return savePacket(payload);
 }
 
-async function captureVisibleTabAndSave(tab, meta) {
+async function captureVisibleTabAndSave(tab, meta, placePhotoshop) {
   let imageDataUrl;
   try {
     imageDataUrl = await captureVisibleTabPng(tab.windowId);
@@ -104,11 +105,12 @@ async function captureVisibleTabAndSave(tab, meta) {
     timestamp_sec: meta.timestampSec,
     capture_method: "visible_tab",
     image_base64: stripDataUrlPrefix(imageDataUrl || ""),
+    photoshop: placePhotoshop,
   };
   return savePacket(payload);
 }
 
-async function captureBurstAndOpenPicker() {
+async function captureBurstAndOpenPicker(placePhotoshop) {
   const tab = await getActiveTab();
   if (!tab || !/^https?:/.test(tab.url || "")) {
     return { ok: false, error: "active tab is not a http(s) page" };
@@ -176,6 +178,7 @@ async function captureBurstAndOpenPicker() {
     timestamp_sec: metadata.timestampSec,
     capture_method: captureMethod,
     frames,
+    photoshop: placePhotoshop,
   };
 
   let response;
@@ -257,7 +260,7 @@ async function savePacket(payload) {
     text: record.clipboard ? record.clipboard.text : `${record.title}\n${record.source_url}`,
     createdAt: record.created_at,
   });
-  return { ok: true, packet: record };
+  return { ok: true, packet: record, photoshop: body.photoshop || null };
 }
 
 async function getActiveTab() {

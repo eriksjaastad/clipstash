@@ -156,6 +156,25 @@ falls back to a single visible-tab shot labeled `capture_method:
 burst_visible_tab` — see [ISSUES.md](./ISSUES.md) #5. Burst sessions expire
 after 45 minutes if nothing is chosen.
 
+### Optional Photoshop place mode (macOS)
+
+**Off by default and never required.** On macOS the helper can hand a saved
+still to Photoshop after the packet is written — either place it into the
+frontmost open document or open it as a new document. Tick **“Also place in
+Photoshop”** in the popup (remembered per browser), send `"photoshop": true`
+in a request, or run the helper with `CLIPSTASH_PHOTOSHOP=1` /
+`clipstashd serve --photoshop` to auto-place every packet. You can also
+re-place a saved packet manually:
+
+```bash
+curl -X POST http://127.0.0.1:8787/packets/<packet-id>/place-photoshop
+```
+
+Photoshop failures (not running, no open document, macOS Automation
+permission, version quirks) come back as clear JSON errors and never break the
+save. Full setup, permissions and troubleshooting:
+[docs/photoshop.md](./docs/photoshop.md).
+
 ## Tests
 
 ```bash

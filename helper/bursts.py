@@ -104,6 +104,7 @@ def create_burst(
         "site": str(metadata.get("site") or "generic"),
         "timestamp_sec": _optional_float(metadata.get("timestamp_sec")),
         "capture_method": str(metadata.get("capture_method") or "burst_canvas"),
+        "photoshop": _as_bool(metadata.get("photoshop")),
     }
     (directory / META_FILENAME).write_text(
         json.dumps(meta, indent=2), encoding="utf-8"
@@ -174,3 +175,12 @@ def _optional_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _as_bool(value: Any) -> bool:
+    """Accept JSON booleans and common string forms of truthiness."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in ("1", "true", "yes", "on")

@@ -4,6 +4,8 @@ Binds 127.0.0.1 only. Endpoints:
 
   GET  /health              -> {"ok": true, "version": "..."}
   POST /packets             -> write a packet (JSON+base64 or multipart), return record
+  POST /packets/{id}/place-photoshop
+                            -> place the packet's still into Photoshop (macOS)
   GET  /packets             -> list packet summaries
   GET  /export.csv          -> CSV of all packets
   POST /bursts              -> create a burst session, return {session_id, picker_url}
@@ -34,7 +36,16 @@ from .bursts import (
     purge_expired_bursts,
     session_dir,
 )
-from .packets import export_csv, list_packets, new_record, write_packet
+from .packets import (
+    export_csv,
+    image_path as packet_image_path,
+    list_packets,
+    new_record,
+    packet_dir,
+    read_record,
+    write_packet,
+)
+from .photoshop import env_photoshop_enabled, place_in_photoshop
 
 JSON = "application/json"
 
@@ -51,7 +62,16 @@ def _decode_image_b64(value: str) -> bytes:
         raise ValueError(f"invalid image_base64: {exc}") from exc
 
 
-def _record_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def _as_bool(value: Any) -> bool:
+    """Accept JSON booleans and common string forms of truthiness."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _record_from_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], bytes, bool]:
     try:
         record = new_record(
             title=str(payload["title"]),
@@ -66,7 +86,7 @@ def _record_from_payload(payload: dict[str, Any]) -> dict[str, Any]:
     except KeyError as exc:
         raise ValueError(f"missing field: {exc.args[0]}") from exc
     image = _decode_image_b64(str(payload.get("image_base64") or ""))
-    return record, image
+    return record, image, _as_bool(payload.get("photoshop"))
 
 
 def _parse_multipart(content_type: str, body: bytes) -> dict[str, Any]:
@@ -91,7 +111,7 @@ def _parse_multipart(content_type: str, body: bytes) -> dict[str, Any]:
     return {"fields": fields, "files": files, "file_list": file_list}
 
 
-def _record_from_multipart(content_type: str, body: bytes) -> dict[str, Any]:
+def _record_from_multipart(content_type: str, body: bytes) -> tuple[dict[str, Any], bytes, bool]:
     parsed = _parse_multipart(content_type, body)
     fields = parsed["fields"]
     files = parsed["files"]
@@ -111,7 +131,7 @@ def _record_from_multipart(content_type: str, body: bytes) -> dict[str, Any]:
         )
     except KeyError as exc:
         raise ValueError(f"missing field: {exc.args[0]}") from exc
-    return record, image
+    return record, image, _as_bool(fields.get("photoshop"))
 
 
 def _optional_float(value: str | None) -> float | None:
@@ -134,6 +154,7 @@ def _burst_metadata_from_fields(fields: dict[str, Any]) -> dict[str, Any]:
         "site": str(fields.get("site") or "generic"),
         "timestamp_sec": _optional_float(fields.get("timestamp_sec")),
         "capture_method": str(fields.get("capture_method") or "burst_canvas"),
+        "photoshop": _as_bool(fields.get("photoshop")),
     }
 
 
@@ -142,7 +163,9 @@ def _burst_from_payload(payload: dict[str, Any]) -> tuple[list[bytes], dict[str,
     if not isinstance(raw_frames, list) or not raw_frames:
         raise ValueError("burst requires a non-empty frames array of data URLs")
     frames = [_decode_image_b64(str(frame)) for frame in raw_frames]
-    return frames, _burst_metadata_from_fields(payload)
+    metadata = _burst_metadata_from_fields(payload)
+    metadata["photoshop"] = _as_bool(payload.get("photoshop"))
+    return frames, metadata
 
 
 def _frame_sort_key(indexed: tuple[int, tuple[str, str, bytes]]) -> tuple[int, int, int]:
@@ -269,7 +292,10 @@ def _picker_html(session_id: str, meta: dict[str, Any]) -> str:
           }});
           const payload = await response.json();
           if (payload.ok) {{
-            status.textContent = `Saved packet ${{payload.packet.id}}`;
+            const placed = payload.photoshop
+              ? (payload.photoshop.ok ? " · Photoshop: placed" : ` · Photoshop: ${{payload.photoshop.error || "not placed"}}`)
+              : "";
+            status.textContent = `Saved packet ${{payload.packet.id}}${{placed}}`;
             status.className = "status ok";
             document.querySelectorAll(".frame").forEach((button) => (button.disabled = true));
           }} else {{
@@ -290,6 +316,7 @@ def _picker_html(session_id: str, meta: dict[str, Any]) -> str:
 class ClipStashHandler(BaseHTTPRequestHandler):
     server_version = "clipstashd/" + __version__
     root: str | None = None
+    photoshop_auto: bool = False
 
     # -- plumbing ---------------------------------------------------------
     def _send(self, status: int, body: bytes, content_type: str) -> None:
@@ -349,6 +376,10 @@ class ClipStashHandler(BaseHTTPRequestHandler):
             if path == "/bursts":
                 self._create_burst_session(content_type, body)
                 return
+            match = re.fullmatch(r"/packets/([^/]+)/place-photoshop", path)
+            if match:
+                self._place_packet_in_photoshop(match.group(1))
+                return
             match = re.fullmatch(r"/picker/([^/]+)/choose", path)
             if match:
                 self._choose_burst_frame(match.group(1), body)
@@ -362,19 +393,27 @@ class ClipStashHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": False, "error": f"internal error: {exc}"}, 500)
 
     # -- action handlers ---------------------------------------------------
+    def _photoshop_requested(self, explicit: Any) -> bool:
+        return _as_bool(explicit) or self.photoshop_auto or env_photoshop_enabled()
+
     def _create_packet(self, content_type: str, body: bytes) -> None:
         if content_type.startswith("multipart/form-data"):
-            record, image = _record_from_multipart(content_type, body)
+            record, image, photoshop = _record_from_multipart(content_type, body)
         elif content_type.startswith(JSON):
             payload = json.loads(body.decode("utf-8") or "{}")
-            record, image = _record_from_payload(payload)
+            record, image, photoshop = _record_from_payload(payload)
         else:
             self._send_json(
                 {"ok": False, "error": "expected JSON or multipart/form-data"}, 415
             )
             return
         written = write_packet(record, image, root=self.root)
-        self._send_json({"ok": True, "packet": written}, 201)
+        response: dict[str, Any] = {"ok": True, "packet": written}
+        if self._photoshop_requested(photoshop):
+            response["photoshop"] = place_in_photoshop(
+                packet_image_path(packet_dir(self.root, str(written["id"])))
+            )
+        self._send_json(response, 201)
 
     def _create_burst_session(self, content_type: str, body: bytes) -> None:
         if content_type.startswith("multipart/form-data"):
@@ -423,8 +462,33 @@ class ClipStashHandler(BaseHTTPRequestHandler):
             frame_index = int(payload.get("frame_index"))
         except (TypeError, ValueError) as exc:
             raise ValueError("frame_index is required") from exc
+        meta = load_session(session_id)
+        photoshop = self._photoshop_requested(
+            _as_bool(payload.get("photoshop")) or _as_bool(meta.get("photoshop"))
+        )
         record = choose_frame(session_id, frame_index, payload, root=self.root)
-        self._send_json({"ok": True, "packet": record}, 200)
+        response: dict[str, Any] = {"ok": True, "packet": record}
+        if photoshop:
+            response["photoshop"] = place_in_photoshop(
+                packet_image_path(packet_dir(self.root, str(record["id"])))
+            )
+        self._send_json(response, 200)
+
+    def _place_packet_in_photoshop(self, packet_id: str) -> None:
+        record = read_record(packet_id, root=self.root)
+        directory = packet_dir(self.root, packet_id)
+        image = directory / str(record.get("image") or "still.png")
+        if not image.exists():
+            raise FileNotFoundError(f"packet {packet_id!r} has no still image")
+        result = place_in_photoshop(image)
+        response: dict[str, Any] = {
+            "ok": bool(result.get("ok")),
+            "packet_id": packet_id,
+            "photoshop": result,
+        }
+        if not result.get("ok"):
+            response["error"] = result.get("error") or "Photoshop place failed"
+        self._send_json(response, 200)
 
     def _picker_url(self, session_id: str) -> str:
         host_header = self.headers.get("Host")
@@ -441,16 +505,26 @@ def create_server(
     host: str = "127.0.0.1",
     port: int = 8787,
     root: str | None = None,
+    photoshop_auto: bool = False,
 ) -> ThreadingHTTPServer:
     """Build a server bound to host (must stay loopback-only in normal use)."""
-    handler = type("BoundClipStashHandler", (ClipStashHandler,), {"root": root})
+    handler = type(
+        "BoundClipStashHandler",
+        (ClipStashHandler,),
+        {"root": root, "photoshop_auto": photoshop_auto},
+    )
     return ThreadingHTTPServer((host, port), handler)
 
 
-def run_server(host: str = "127.0.0.1", port: int = 8787, root: str | None = None) -> None:
+def run_server(
+    host: str = "127.0.0.1",
+    port: int = 8787,
+    root: str | None = None,
+    photoshop_auto: bool = False,
+) -> None:
     if host not in ("127.0.0.1", "localhost", "::1"):
         raise ValueError("clipstashd refuses to bind to non-loopback interfaces")
-    server = create_server(host=host, port=port, root=root)
+    server = create_server(host=host, port=port, root=root, photoshop_auto=photoshop_auto)
     actual = server.server_address[1]
     print(f"clipstashd {__version__} listening on http://{host}:{actual} (root: {root or '~/Clipstash/packets'})")
     try:
