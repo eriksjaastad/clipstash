@@ -1,0 +1,18 @@
+id: 01JDEMO000000000000000000
+created_at: '2026-09-25T12:00:00+00:00'
+title: Synthetic demo packet (YouTube)
+source_url: https://www.youtube.com/watch?v=dQw4w9WgXcQ
+page_url: https://www.youtube.com/watch?v=dQw4w9WgXcQ
+timestamp_sec: 142.5
+site: youtube
+image: still.png
+tags:
+- demo
+- synthetic
+notes: Synthetic example only — no real client data.
+clipboard:
+  title: Synthetic demo packet (YouTube)
+  url: https://www.youtube.com/watch?v=dQw4w9WgXcQ
+  text: 'Synthetic demo packet (YouTube)
+
+    https://www.youtube.com/watch?v=dQw4w9WgXcQ'
