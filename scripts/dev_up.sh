@@ -73,11 +73,20 @@ install_deps() {
   printf '%s' "$DEPS_STAMP" > "$STAMP"
 }
 
+venv_ready() {
+  # Everything the launcher would have installed must live in this venv
+  # (not somewhere earlier on PATH) before we stamp it as current.
+  [ -n "${VIRTUAL_ENV:-}" ] &&
+    [ -x "${VIRTUAL_ENV}/bin/clipstashd" ] &&
+    [ -x "${VIRTUAL_ENV}/bin/pytest" ] &&
+    python -c "import helper" >/dev/null 2>&1
+}
+
 if [ ! -f "$STAMP" ]; then
   # Transition from a venv created before the stamp existed: reuse an
   # already-installed, importable helper without touching the package index,
   # so the first offline re-run still starts.
-  if python -c "import helper" >/dev/null 2>&1 && command -v clipstashd >/dev/null 2>&1; then
+  if venv_ready; then
     printf '%s' "$DEPS_STAMP" > "$STAMP"
   else
     install_deps
