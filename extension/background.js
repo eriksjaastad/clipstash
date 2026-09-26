@@ -5,10 +5,6 @@ const HELPER_BASE = "http://127.0.0.1:8787";
 const HISTORY_KEY = "clipstashHistory";
 const HISTORY_MAX = 20;
 
-// 1x1 transparent PNG — placeholder still for the slice-2 "save packet" stub.
-const STUB_PNG_DATA_URL =
-  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
-
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   handleMessage(message)
     .then((response) => sendResponse(response))
@@ -21,7 +17,7 @@ async function handleMessage(message) {
     case "HEALTH":
       return checkHealth();
     case "SAVE_PACKET":
-      return saveCurrentPage();
+      return captureAndSave();
     case "GET_HISTORY":
       return { ok: true, history: await getHistory() };
     default:
@@ -43,20 +39,38 @@ async function checkHealth() {
   }
 }
 
-async function saveCurrentPage() {
+async function captureAndSave() {
   const tab = await getActiveTab();
   if (!tab || !/^https?:/.test(tab.url || "")) {
     return { ok: false, error: "active tab is not a http(s) page" };
   }
 
-  // Slice 2 stub: no in-page frame yet. Send a placeholder still so the
-  // packet schema and helper write path are exercised end to end.
+  let injection;
+  try {
+    injection = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ["lib/adapters.js", "content.js"],
+    });
+  } catch (error) {
+    return { ok: false, error: `injection failed: ${error}` };
+  }
+
+  const captured = injection && injection[0] && injection[0].result;
+  if (!captured || !captured.ok) {
+    return { ok: false, error: (captured && captured.error) || "frame capture failed" };
+  }
+
+  const imageBase64 = (captured.imageDataUrl || "").includes(",")
+    ? captured.imageDataUrl.split(",", 2)[1]
+    : captured.imageDataUrl;
+
   const payload = {
-    title: tab.title || tab.url,
-    source_url: tab.url,
-    page_url: tab.url,
-    site: "generic",
-    image_base64: STUB_PNG_DATA_URL.split(",", 2)[1],
+    title: captured.title,
+    source_url: captured.sourceUrl,
+    page_url: captured.pageUrl || captured.sourceUrl,
+    site: captured.site || "generic",
+    timestamp_sec: captured.timestampSec,
+    image_base64: imageBase64,
   };
   return savePacket(payload);
 }
