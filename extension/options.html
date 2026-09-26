@@ -14,18 +14,85 @@
         background: #f4f2ee;
         padding: 1px 5px;
         border-radius: 4px;
+        word-break: break-all;
+      }
+      dl {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 4px 12px;
+        margin: 1rem 0;
+      }
+      dt {
+        font-weight: 600;
+      }
+      dd {
+        margin: 0;
+        min-width: 0;
+      }
+      label {
+        display: block;
+        font-weight: 600;
+        margin-top: 1rem;
+      }
+      input[type="text"] {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 6px 8px;
+        font: inherit;
+        margin-top: 0.25rem;
+      }
+      button {
+        margin-top: 0.75rem;
+        padding: 6px 14px;
+        font: inherit;
+      }
+      .status {
+        margin-top: 1rem;
+        color: #6b675f;
+      }
+      .status.ok {
+        color: #1f7a3d;
+      }
+      .status.error {
+        color: #c0392b;
+      }
+      .note {
+        color: #6b675f;
+        font-size: 13px;
       }
     </style>
   </head>
   <body>
     <h1>clipstash options</h1>
     <p>
-      The packet save root is configured on the helper side for v1, not here.
-      Start the helper with a custom root:
+      The helper is the source of truth for the packet save root. Changes are
+      persisted to the helper config file and apply to new saves immediately.
     </p>
-    <pre>clipstashd --root /path/to/packets</pre>
-    <p>or set <code>CLIPSTASH_ROOT</code> before launching.</p>
-    <p>Default: <code>~/Clipstash/packets</code></p>
+    <dl>
+      <dt>Current root</dt>
+      <dd><code id="current-root">…</code></dd>
+      <dt>Default (no overrides)</dt>
+      <dd><code id="default-root">…</code></dd>
+      <dt>Config file</dt>
+      <dd><code id="config-path">…</code></dd>
+    </dl>
+    <form id="config-form">
+      <label for="packet-root">Packet save root</label>
+      <input
+        type="text"
+        id="packet-root"
+        placeholder="~/Clipstash/packets"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <button type="submit" id="save">Save root</button>
+    </form>
+    <p id="status" class="status">loading…</p>
+    <p class="note">
+      Changing the root does not move old packets: packets already saved stay in
+      the previous folder, and new saves go to the new folder. The helper must
+      be running for this page to work.
+    </p>
     <script src="options.js"></script>
   </body>
 </html>

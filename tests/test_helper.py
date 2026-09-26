@@ -6,13 +6,21 @@ import base64
 import json
 import threading
 import urllib.request
+from pathlib import Path
 
 import pytest
 
 from helper import __version__
 from helper import bursts
 from helper.bursts import create_burst, load_session, session_dir
+from helper.config import (
+    default_packet_root,
+    effective_packet_root,
+    load_config,
+    save_config,
+)
 from helper.packets import (
+    default_root,
     export_csv,
     list_packets,
     new_record,
@@ -114,7 +122,9 @@ def test_list_and_export_csv(tmp_path):
 
 @pytest.fixture()
 def server(tmp_path):
-    httpd = create_server(host="127.0.0.1", port=0, root=str(tmp_path))
+    httpd = create_server(
+        host="127.0.0.1", port=0, root=str(tmp_path), config_path=tmp_path / "config.json"
+    )
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
     yield httpd
@@ -125,7 +135,7 @@ def server(tmp_path):
 
 def request(url: str, data: bytes | None = None, method: str | None = None, headers: dict | None = None):
     headers = dict(headers or {})
-    if method == "POST" and data is not None and "Content-Type" not in headers:
+    if method in ("POST", "PUT") and data is not None and "Content-Type" not in headers:
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
@@ -250,6 +260,90 @@ def test_export_csv_endpoint(server):
 def test_unknown_route_404(server):
     status, _, _ = request(server_url(server, "/nope"))
     assert status == 404
+
+
+# --------------------------------------------------------------------------
+# config endpoint + root resolution
+# --------------------------------------------------------------------------
+
+def test_config_endpoint_get_shape(server, tmp_path):
+    status, content_type, body = request(server_url(server, "/config"))
+    payload = json.loads(body)
+    assert status == 200
+    assert content_type == "application/json"
+    assert payload["ok"] is True
+    assert payload["packet_root"] == str(Path(tmp_path).resolve())
+    assert payload["default_root"] == str(default_packet_root())
+    assert payload["config_path"] == str(tmp_path / "config.json")
+
+
+def test_put_config_persists_updates_live_root_and_writes(server, tmp_path):
+    new_root = tmp_path / "new-packets"
+    status, _, body = request(
+        server_url(server, "/config"),
+        data=json.dumps({"packet_root": str(new_root)}).encode("utf-8"),
+        method="PUT",
+    )
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["ok"] is True
+    assert payload["packet_root"] == str(new_root.resolve())
+
+    # GET returns the new root.
+    status, _, body = request(server_url(server, "/config"))
+    assert status == 200
+    assert json.loads(body)["packet_root"] == str(new_root.resolve())
+
+    # New saves land under the new root without a restart.
+    status, _, body = request(
+        server_url(server, "/packets"),
+        data=json.dumps(make_payload(title="Under new root")).encode("utf-8"),
+        method="POST",
+    )
+    assert status == 201
+    record = json.loads(body)["packet"]
+    assert (new_root / record["id"] / "still.png").exists()
+    assert (new_root / record["id"] / "record.yaml").exists()
+
+    # The root was persisted on disk.
+    config_path = server.RequestHandlerClass.config_path
+    assert load_config(config_path) == {"packet_root": str(new_root.resolve())}
+
+    # Simulate a helper restart: no CLI root, same config file.
+    restarted = create_server(host="127.0.0.1", port=0, root=None, config_path=config_path)
+    assert restarted.RequestHandlerClass.root == str(new_root.resolve())
+    restarted.server_close()
+
+
+def test_put_config_rejects_invalid_root(server):
+    for bad in ("", "   ", 42, None, "relative/path"):
+        status, _, body = request(
+            server_url(server, "/config"),
+            data=json.dumps({"packet_root": bad}).encode("utf-8"),
+            method="PUT",
+        )
+        assert status == 400, f"packet_root={bad!r} should be rejected"
+        assert json.loads(body)["ok"] is False
+
+
+def test_effective_packet_root_priority(monkeypatch, tmp_path):
+    cli_root = tmp_path / "cli"
+    config_root = tmp_path / "config"
+    env_root = tmp_path / "env"
+    config_path = tmp_path / "config.json"
+
+    save_config({"packet_root": str(config_root)}, config_path)
+    monkeypatch.setenv("CLIPSTASH_ROOT", str(env_root))
+
+    # CLI wins.
+    assert effective_packet_root(cli_root, config_path=config_path) == cli_root
+    # Config beats env.
+    assert effective_packet_root(None, config_path=config_path) == config_root.resolve()
+    # Env beats the built-in default when no config exists.
+    assert effective_packet_root(None, config_path=tmp_path / "missing.json") == env_root
+    # Default with no overrides at all.
+    monkeypatch.delenv("CLIPSTASH_ROOT")
+    assert effective_packet_root(None, config_path=tmp_path / "missing.json") == default_root()
 
 
 # --------------------------------------------------------------------------

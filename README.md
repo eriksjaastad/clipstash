@@ -49,6 +49,23 @@ clipstashd
 Packets are written to `~/Clipstash/packets/<id>/` by default. Override with
 `CLIPSTASH_ROOT=/path/to/packets` or `clipstashd --root /path/to/packets`.
 
+You can also view and change the save root from the extension: open the
+extension's **Options** page (right-click the toolbar icon → **Options**, or
+`chrome://extensions` → **Details** → **Extension options**). The page talks to
+the running helper and stores the new root in `~/Clipstash/config.json`, so it
+survives helper restarts. The root is resolved in this order:
+
+1. `--root` on the command line (that process only)
+2. `packet_root` in `~/Clipstash/config.json` (what the options page edits)
+3. `CLIPSTASH_ROOT` environment variable
+4. `~/Clipstash/packets`
+
+Changing the root is **create-on-write**: the helper creates the folder for
+you and new saves go there, but existing packets are never moved or deleted —
+old packets stay in the previous folder. A `--root` or `CLIPSTASH_ROOT`
+override wins for the current process until a `PUT /config` (or the options
+page) updates the config file and the live server root.
+
 Quick check:
 
 ```bash

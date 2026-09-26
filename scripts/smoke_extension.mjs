@@ -405,6 +405,78 @@ async function runBurst(url, doc) {
   check(messages.length === 1, "picker-bridge ignores chosen events without a packet");
 }
 
+// -- options.js: loads config, saves new root via PUT /config ------------------
+
+{
+  const optionsSrc = readFileSync(join(root, "extension/options.js"), "utf8");
+  const elements = {
+    "current-root": { textContent: "" },
+    "default-root": { textContent: "" },
+    "config-path": { textContent: "" },
+    "packet-root": { value: "" },
+    status: { textContent: "", className: "" },
+    "config-form": {
+      listeners: {},
+      addEventListener(name, fn) {
+        this.listeners[name] = fn;
+      },
+    },
+  };
+  const fetched = [];
+  const sandbox = {
+    console,
+    document: {
+      getElementById(id) {
+        return elements[id] ?? null;
+      },
+    },
+    fetch: async (url, options = {}) => {
+      fetched.push({ url, options });
+      if (options.method === "PUT") {
+        const body = JSON.parse(options.body);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: true,
+            packet_root: `/resolved/${body.packet_root}`,
+            default_root: "/home/clipstash/Clipstash/packets",
+            config_path: "/home/clipstash/Clipstash/config.json",
+          }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          packet_root: "/home/clipstash/Clipstash/packets",
+          default_root: "/home/clipstash/Clipstash/packets",
+          config_path: "/home/clipstash/Clipstash/config.json",
+        }),
+      };
+    },
+  };
+  createContext(sandbox);
+  runInNewContext(optionsSrc, sandbox, { filename: "options.js" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  check(fetched.length >= 1 && fetched[0].url.endsWith("/config"), "options.js fetches /config on load");
+  check(
+    elements["current-root"].textContent === "/home/clipstash/Clipstash/packets",
+    "options.js renders the current root"
+  );
+  check(typeof elements["config-form"].listeners.submit === "function", "options.js registers a save handler");
+
+  elements["packet-root"].value = "~/new-packets";
+  await elements["config-form"].listeners.submit({ preventDefault() {} });
+
+  const put = fetched.find((entry) => entry.options.method === "PUT");
+  check(Boolean(put) && put.url.endsWith("/config"), "options.js PUTs /config to save");
+  check(put && JSON.parse(put.options.body).packet_root === "~/new-packets", "options.js sends the new packet_root");
+  check(elements.status.textContent === "saved", "options.js reports saved");
+}
+
 if (failures > 0) {
   console.error(`\n${failures} smoke check(s) failed`);
   process.exit(1);

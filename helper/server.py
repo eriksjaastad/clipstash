@@ -3,6 +3,8 @@
 Binds 127.0.0.1 only. Endpoints:
 
   GET  /health              -> {"ok": true, "version": "..."}
+  GET  /config              -> {"ok": true, "packet_root": "...", "default_root": "...", "config_path": "..."}
+  PUT  /config              -> set packet_root, persist config.json, update live root
   POST /packets             -> write a packet (JSON+base64 or multipart), return record
   POST /packets/{id}/place-photoshop
                             -> place the packet's still into Photoshop (macOS)
@@ -26,6 +28,7 @@ import threading
 from email.parser import BytesParser
 from email.policy import default as email_policy
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -37,6 +40,14 @@ from .bursts import (
     load_session,
     purge_expired_bursts,
     session_dir,
+)
+from .config import (
+    default_config_path,
+    default_packet_root,
+    effective_packet_root,
+    load_config,
+    normalize_packet_root,
+    save_config,
 )
 from .packets import (
     export_csv,
@@ -339,6 +350,7 @@ def _picker_html(session_id: str, meta: dict[str, Any]) -> str:
 class ClipStashHandler(BaseHTTPRequestHandler):
     server_version = "clipstashd/" + __version__
     root: str | None = None
+    config_path: str | None = None
     photoshop_auto: bool = False
     pending_history: list[dict[str, Any]] = []
     pending_history_lock: threading.Lock = threading.Lock()
@@ -349,7 +361,7 @@ class ClipStashHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
@@ -383,6 +395,8 @@ class ClipStashHandler(BaseHTTPRequestHandler):
         try:
             if path == "/health":
                 self._send_json({"ok": True, "version": __version__})
+            elif path == "/config":
+                self._serve_config()
             elif path == "/packets":
                 self._send_json({"ok": True, "packets": list_packets(self.root)})
             elif path == "/export.csv":
@@ -429,7 +443,49 @@ class ClipStashHandler(BaseHTTPRequestHandler):
         except Exception as exc:  # pragma: no cover - last-resort guard
             self._send_json({"ok": False, "error": f"internal error: {exc}"}, 500)
 
+    def do_PUT(self):  # noqa: N802
+        path = urlparse(self.path).path
+        body = self._read_body()
+        try:
+            if path == "/config":
+                self._update_config(body)
+                return
+            self._send_json({"ok": False, "error": "not found"}, 404)
+        except (ValueError, json.JSONDecodeError) as exc:
+            self._send_json({"ok": False, "error": str(exc)}, 400)
+        except OSError as exc:
+            self._send_json({"ok": False, "error": str(exc)}, 400)
+        except Exception as exc:  # pragma: no cover - last-resort guard
+            self._send_json({"ok": False, "error": f"internal error: {exc}"}, 500)
+
     # -- action handlers ---------------------------------------------------
+    def _config_payload(self) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "packet_root": str(Path(self.root or default_packet_root()).expanduser().resolve()),
+            "default_root": str(default_packet_root()),
+            "config_path": str(self.config_path or default_config_path()),
+        }
+
+    def _serve_config(self) -> None:
+        self._send_json(self._config_payload())
+
+    def _update_config(self, body: bytes) -> None:
+        payload = json.loads(body.decode("utf-8") or "{}")
+        if not isinstance(payload, dict):
+            raise ValueError("expected a JSON object")
+        path = normalize_packet_root(payload.get("packet_root"))
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise ValueError(f"cannot create packet root {str(path)!r}: {exc}") from exc
+        config_path = self.config_path or str(default_config_path())
+        config = load_config(config_path)
+        config["packet_root"] = str(path)
+        save_config(config, config_path)
+        type(self).root = str(path)
+        self._send_json(self._config_payload())
+
     def _photoshop_requested(self, explicit: Any) -> bool:
         return _as_bool(explicit) or self.photoshop_auto or env_photoshop_enabled()
 
@@ -544,13 +600,17 @@ def create_server(
     port: int = 8787,
     root: str | None = None,
     photoshop_auto: bool = False,
+    config_path: str | Path | None = None,
 ) -> ThreadingHTTPServer:
     """Build a server bound to host (must stay loopback-only in normal use)."""
+    config_path_obj = Path(config_path) if config_path else default_config_path()
+    effective_root = effective_packet_root(root, config_path=config_path_obj)
     handler = type(
         "BoundClipStashHandler",
         (ClipStashHandler,),
         {
-            "root": root,
+            "root": str(effective_root),
+            "config_path": str(config_path_obj),
             "photoshop_auto": photoshop_auto,
             "pending_history": [],
             "pending_history_lock": threading.Lock(),
@@ -564,12 +624,21 @@ def run_server(
     port: int = 8787,
     root: str | None = None,
     photoshop_auto: bool = False,
+    config_path: str | Path | None = None,
 ) -> None:
     if host not in ("127.0.0.1", "localhost", "::1"):
         raise ValueError("clipstashd refuses to bind to non-loopback interfaces")
-    server = create_server(host=host, port=port, root=root, photoshop_auto=photoshop_auto)
+    config_path_obj = Path(config_path) if config_path else default_config_path()
+    effective_root = effective_packet_root(root, config_path=config_path_obj)
+    server = create_server(
+        host=host,
+        port=port,
+        root=root,
+        photoshop_auto=photoshop_auto,
+        config_path=config_path_obj,
+    )
     actual = server.server_address[1]
-    print(f"clipstashd {__version__} listening on http://{host}:{actual} (root: {root or '~/Clipstash/packets'})")
+    print(f"clipstashd {__version__} listening on http://{host}:{actual} (root: {effective_root})")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

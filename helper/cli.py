@@ -7,6 +7,7 @@ import os
 import sys
 
 from . import __version__
+from .config import effective_packet_root
 from .packets import export_csv
 
 
@@ -55,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
     command = args.command or "serve"
 
     if command == "export":
-        sys.stdout.write(export_csv(getattr(args, "root", None)))
+        sys.stdout.write(export_csv(effective_packet_root(getattr(args, "root", None))))
         return 0
 
     from .server import run_server
@@ -63,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
     run_server(
         host=args.host,
         port=args.port,
-        root=args.root,
+        root=effective_packet_root(getattr(args, "root", None)),
         photoshop_auto=getattr(args, "photoshop", False),
     )
     return 0
