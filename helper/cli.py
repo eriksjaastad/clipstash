@@ -77,6 +77,15 @@ Health check:
 Extension:
   chrome://extensions → Developer mode → Load unpacked → choose extension/.
 
+Native burst (cross-origin video)
+---------------------------------
+Cross-origin video (e.g. googlevideo on YouTube) is captured through a
+helper-native ffmpeg burst from the video's media URL. Install ffmpeg on
+macOS with ``brew install ffmpeg``. YouTube signed media URLs download best
+with ``yt-dlp`` on PATH (``brew install yt-dlp``). Both are optional system
+tools; when they are missing the extension falls back to a single
+visible-tab still.
+
 Troubleshooting
 ---------------
   python3 not found         install Python 3.11+ (python.org or Homebrew)
@@ -85,6 +94,8 @@ Troubleshooting
                             that no firewall blocks loopback
   clipstashd not found      activate the venv, or use `uv run clipstashd`
                             after `uv sync`
+  native burst unavailable  brew install ffmpeg (and optionally yt-dlp) so
+                            the helper can extract frames from media URLs
 """
 
 from __future__ import annotations

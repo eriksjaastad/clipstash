@@ -7,8 +7,11 @@
 // to captureVisibleTab; the content scripts report a `cropRect` (video element
 // CSS box × devicePixelRatio) with the taint signal, which we forward as
 // `crop_rect` so the helper can crop the full-tab PNG to the video rectangle.
-// Burst-chosen history entries are drained from the helper's pending queue so
-// picker tabs don't need direct storage access.
+// For tainted *bursts* we first try the helper's native ffmpeg burst from the
+// video's media URL (`burst_ffmpeg`); when the media URL is missing or the
+// helper path fails, we fall back to a single cropped visible-tab shot
+// (`burst_visible_tab`). Burst-chosen history entries are drained from the
+// helper's pending queue so picker tabs don't need direct storage access.
 
 const HELPER_BASE = "http://127.0.0.1:8787";
 const HISTORY_KEY = "clipstashHistory";
@@ -155,11 +158,12 @@ async function captureBurstAndOpenPicker(placePhotoshop) {
   let captureMethod = "burst_canvas";
 
   if (captured.tainted && !captured.ok) {
-    // Canvas taint (e.g. googlevideo on YouTube): the burst session falls
-    // back to a single visible-tab shot, labeled burst_visible_tab. The
-    // content script's `cropRect` is forwarded as `crop_rect` so the helper
-    // crops that single frame to the video rectangle.
-    captureMethod = "burst_visible_tab";
+    // Canvas taint (e.g. googlevideo on YouTube). First try the helper's
+    // native ffmpeg burst from the video's media URL (`burst_ffmpeg`); when
+    // that is unavailable or fails, fall back to a single visible-tab shot,
+    // labeled burst_visible_tab. The content script's `cropRect` is
+    // forwarded as `crop_rect` so the helper crops that single frame to the
+    // video rectangle.
     metadata = {
       title: captured.title,
       sourceUrl: captured.sourceUrl,
@@ -167,6 +171,16 @@ async function captureBurstAndOpenPicker(placePhotoshop) {
       site: captured.site,
       timestampSec: captured.timestampSec,
     };
+    const native = await tryNativeBurst(captured, placePhotoshop);
+    if (native) {
+      return {
+        ok: true,
+        session_id: native.session_id,
+        picker_url: native.picker_url,
+        capture_method: native.capture_method || "burst_ffmpeg",
+      };
+    }
+    captureMethod = "burst_visible_tab";
     try {
       const imageDataUrl = await captureVisibleTabPng(tab.windowId);
       frames = [imageDataUrl];
@@ -227,6 +241,55 @@ async function captureBurstAndOpenPicker(placePhotoshop) {
   }
   startPendingHistoryPolling();
   return { ok: true, session_id: body.session_id, picker_url: body.picker_url };
+}
+
+// Try the helper's native ffmpeg burst (`POST /bursts/ffmpeg`) for a tainted
+// canvas when the content script reported a media URL. Returns the picker
+// result on success, or null when the path is unavailable so the caller can
+// fall back to the single visible-tab shot. Never throws.
+async function tryNativeBurst(captured, placePhotoshop) {
+  const mediaUrl = String(captured.mediaUrl || "").trim();
+  if (!/^https?:\/\//i.test(mediaUrl)) {
+    return null;
+  }
+  let response;
+  try {
+    response = await fetch(`${HELPER_BASE}/bursts/ffmpeg`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        media_url: mediaUrl,
+        timestamp_sec: captured.timestampSec,
+        title: captured.title,
+        source_url: captured.sourceUrl,
+        page_url: captured.pageUrl,
+        site: captured.site,
+        photoshop: placePhotoshop,
+      }),
+    });
+  } catch (_error) {
+    return null;
+  }
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || !body.ok) {
+    console.warn(
+      "clipstash: native ffmpeg burst unavailable, falling back to visible_tab:",
+      body.error || `helper returned ${response.status}`
+    );
+    return null;
+  }
+  try {
+    await createTab(body.picker_url);
+  } catch (_error) {
+    return null;
+  }
+  startPendingHistoryPolling();
+  return {
+    ok: true,
+    session_id: body.session_id,
+    picker_url: body.picker_url,
+    capture_method: body.capture_method || "burst_ffmpeg",
+  };
 }
 
 function createTab(url) {

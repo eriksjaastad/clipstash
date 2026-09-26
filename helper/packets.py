@@ -89,9 +89,14 @@ def new_record(
 ) -> dict[str, Any]:
     """Build a packet record dict from PLAN.md §2.
 
-    `capture_method` records how the still was produced: `canvas` (in-page
-    video frame draw) or `visible_tab` (chrome.tabs.captureVisibleTab
-    fallback for tainted canvases). A `visible_tab` still may be cropped to
+    `capture_method` records how the still was produced. Single captures use
+    `canvas` (in-page video frame draw) or `visible_tab`
+    (chrome.tabs.captureVisibleTab fallback for tainted canvases). Burst
+    sessions use `burst_canvas` (in-page canvas stepping), `burst_ffmpeg`
+    (helper-native multi-frame extraction from the video's media URL via
+    ffmpeg), or `burst_visible_tab` (single visible-tab fallback when the
+    canvas is tainted and the media cannot be fetched / ffmpeg is missing).
+    A `visible_tab` still may be cropped to
     the video element's on-screen rectangle before it is written when the
     request carries a `crop_rect` (see helper.crop); the field itself is
     ephemeral and never persisted here.

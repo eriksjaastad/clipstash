@@ -3,7 +3,8 @@
 // Steps video.currentTime by ±STEP × N around the current position and
 // canvas-captures each frame to a PNG data URL. If the canvas is tainted by
 // cross-origin media (e.g. googlevideo on YouTube), the script returns the
-// metadata plus `tainted: true` so background.js can fall back to a single
+// metadata plus `tainted: true` so background.js can try a helper-native
+// ffmpeg burst from the video's media URL before falling back to a single
 // chrome.tabs.captureVisibleTab shot for the burst session. That fallback
 // signal also carries `cropRect` — the video element's on-screen CSS box ×
 // devicePixelRatio — so the helper can crop the full-tab PNG to the video
@@ -87,6 +88,7 @@
           ok: false,
           tainted: true,
           ...metadata,
+          mediaUrl: video.currentSrc || video.src || "",
           captureMethod: "burst_visible_tab",
           cropRect: videoCropRect(video),
           error: "burst canvas capture failed (tainted)",
