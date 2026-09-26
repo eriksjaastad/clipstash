@@ -6,6 +6,7 @@ const $ = (id) => document.getElementById(id);
 
 document.addEventListener("DOMContentLoaded", () => {
   $("save-packet").addEventListener("click", onSavePacket);
+  $("burst-pick").addEventListener("click", onBurstPick);
   $("helper-refresh").addEventListener("click", refreshHealth);
   $("open-options").addEventListener("click", (event) => {
     event.preventDefault();
@@ -55,6 +56,26 @@ async function onSavePacket() {
   } else {
     status.className = "status error";
     status.textContent = (response && response.error) || "save failed";
+  }
+}
+
+async function onBurstPick() {
+  const status = $("status");
+  const button = $("burst-pick");
+  button.disabled = true;
+  status.hidden = false;
+  status.className = "status";
+  status.textContent = "capturing burst…";
+
+  const response = await send({ type: "BURST_PICK" });
+  button.disabled = false;
+
+  if (response && response.ok) {
+    status.className = "status success";
+    status.textContent = `Picker opened (${response.session_id})`;
+  } else {
+    status.className = "status error";
+    status.textContent = (response && response.error) || "burst failed";
   }
 }
 

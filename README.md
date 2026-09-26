@@ -91,6 +91,25 @@ Permissions stay minimal: `activeTab` is already declared and grants
 `captureVisibleTab` when the user invokes the extension from the toolbar, so the
 fallback needs no extra `tabs` or host permission.
 
+### Burst & pick
+
+Instead of a single Save, **Burst & pick** steps the video by small deltas
+(±0.15s × 7, centered on the current time), canvas-captures each frame, and
+opens a local picker page where you click the best frame:
+
+1. Open a video page and click the clipstash toolbar icon.
+2. Press **Burst & pick**.
+3. The helper stores the burst session in a temp dir and opens
+   `http://127.0.0.1:8787/picker/<id>` in a new tab.
+4. Click a frame; the helper writes a normal packet (image + title + URL) and
+   deletes the session.
+
+The chosen packet records `capture_method: burst_canvas`. When the canvas is
+tainted by cross-origin media (e.g. googlevideo on YouTube), the burst session
+falls back to a single visible-tab shot labeled `capture_method:
+burst_visible_tab` — see [ISSUES.md](./ISSUES.md) #5. Burst sessions expire
+after 45 minutes if nothing is chosen.
+
 ## Tests
 
 ```bash

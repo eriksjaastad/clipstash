@@ -18,6 +18,8 @@ async function handleMessage(message) {
       return checkHealth();
     case "SAVE_PACKET":
       return captureAndSave();
+    case "BURST_PICK":
+      return captureBurstAndOpenPicker();
     case "GET_HISTORY":
       return { ok: true, history: await getHistory() };
     default:
@@ -104,6 +106,112 @@ async function captureVisibleTabAndSave(tab, meta) {
     image_base64: stripDataUrlPrefix(imageDataUrl || ""),
   };
   return savePacket(payload);
+}
+
+async function captureBurstAndOpenPicker() {
+  const tab = await getActiveTab();
+  if (!tab || !/^https?:/.test(tab.url || "")) {
+    return { ok: false, error: "active tab is not a http(s) page" };
+  }
+
+  let injection;
+  try {
+    injection = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: ["lib/adapters.js", "lib/burst.js"],
+    });
+  } catch (error) {
+    return { ok: false, error: `burst injection failed: ${error}` };
+  }
+
+  const captured = injection && injection[0] && injection[0].result;
+  if (!captured) {
+    return { ok: false, error: "burst capture failed" };
+  }
+
+  let frames = [];
+  let metadata = {};
+  let captureMethod = "burst_canvas";
+
+  if (captured.tainted && !captured.ok) {
+    // Canvas taint (e.g. googlevideo on YouTube): the burst session falls
+    // back to a single visible-tab shot, labeled burst_visible_tab.
+    captureMethod = "burst_visible_tab";
+    metadata = {
+      title: captured.title,
+      sourceUrl: captured.sourceUrl,
+      pageUrl: captured.pageUrl,
+      site: captured.site,
+      timestampSec: captured.timestampSec,
+    };
+    try {
+      const imageDataUrl = await captureVisibleTabPng(tab.windowId);
+      frames = [imageDataUrl];
+    } catch (error) {
+      return { ok: false, error: `visible-tab burst fallback failed: ${error}` };
+    }
+  } else if (captured.ok) {
+    captureMethod = captured.captureMethod || "burst_canvas";
+    metadata = {
+      title: captured.title,
+      sourceUrl: captured.sourceUrl,
+      pageUrl: captured.pageUrl || captured.sourceUrl,
+      site: captured.site || "generic",
+      timestampSec: captured.timestampSec,
+    };
+    frames = captured.frames || [];
+  } else {
+    return { ok: false, error: captured.error || "burst capture failed" };
+  }
+
+  if (!frames.length) {
+    return { ok: false, error: "burst produced no frames" };
+  }
+
+  const payload = {
+    title: metadata.title,
+    source_url: metadata.sourceUrl,
+    page_url: metadata.pageUrl,
+    site: metadata.site,
+    timestamp_sec: metadata.timestampSec,
+    capture_method: captureMethod,
+    frames,
+  };
+
+  let response;
+  try {
+    response = await fetch(`${HELPER_BASE}/bursts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    return { ok: false, error: `helper unreachable: ${error}` };
+  }
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok || !body.ok) {
+    return { ok: false, error: body.error || `helper returned ${response.status}` };
+  }
+
+  try {
+    await createTab(body.picker_url);
+  } catch (error) {
+    return { ok: false, error: `opening picker tab failed: ${error}` };
+  }
+  return { ok: true, session_id: body.session_id, picker_url: body.picker_url };
+}
+
+function createTab(url) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.create({ url }, (tab) => {
+      const error = chrome.runtime.lastError;
+      if (error) {
+        reject(new Error(error.message));
+      } else {
+        resolve(tab);
+      }
+    });
+  });
 }
 
 // Callback-style wrapper: works on every Chrome MV3 build regardless of
