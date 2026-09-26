@@ -4,21 +4,30 @@
 <!--
   Per-user LaunchAgent template that starts the clipstash helper at login.
 
-  Install:
-    1. With the helper's virtualenv active, find the entry point path:
-         command -v clipstashd
-    2. Copy this file into place and edit ProgramArguments below so it points
-       at that path (replace /usr/local/bin/clipstashd):
-         mkdir -p ~/Library/LaunchAgents
-         cp packaging/macos/com.clipstash.helper.plist ~/Library/LaunchAgents/
-         # edit ~/Library/LaunchAgents/com.clipstash.helper.plist
-    3. Load it:
-         launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.clipstash.helper.plist
-    4. Check health:
-         curl http://127.0.0.1:8787/health
+  ProgramArguments uses the @@CLIPSTASHD@@ placeholder. Two supported paths:
+
+  1. Homebrew formula (packaging/homebrew/clipstash.rb):
+       install the formula, then set ProgramArguments to
+       $(brew --prefix)/bin/clipstashd
+     (see packaging/homebrew/README.md for the brew install command).
+
+  2. Single-binary install:
+       ./scripts/build_macos_binary.sh
+       ./scripts/install_macos_helper.sh
+     The install script substitutes @@CLIPSTASHD@@ with ~/bin/clipstashd,
+     copies this file to ~/Library/LaunchAgents/, and loads it for you.
+
+  Manual install:
+    mkdir -p ~/Library/LaunchAgents
+    cp packaging/macos/com.clipstash.helper.plist ~/Library/LaunchAgents/
+    # edit @@CLIPSTASHD@@ to the clipstashd path
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.clipstash.helper.plist
 
   Unload:
     launchctl bootout gui/$(id -u)/com.clipstash.helper
+
+  Health check:
+    curl http://127.0.0.1:8787/health
 
   The job runs at login only (RunAtLoad); launchd does not restart it if it
   exits. For Photoshop Automation consent, grant the program named in
@@ -31,7 +40,7 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/local/bin/clipstashd</string>
+    <string>@@CLIPSTASHD@@</string>
   </array>
 
   <key>RunAtLoad</key>

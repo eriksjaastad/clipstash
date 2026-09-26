@@ -50,7 +50,18 @@ extension Options page (writes ``~/Clipstash/config.json``) or with
 
 Setup
 -----
-Requires macOS 12+, Python 3.11+, and Chrome (for the unpacked extension).
+Stranger install on macOS, either path (see packaging/homebrew/README.md):
+
+  Homebrew formula
+      packaging/homebrew/clipstash.rb installs clipstashd on PATH (the README
+      next to it has the brew install command).
+
+  Single binary
+      scripts/build_macos_binary.sh builds dist/clipstashd, then
+      scripts/install_macos_helper.sh installs it to ~/bin/clipstashd and
+      loads the LaunchAgent.
+
+Developer/venv path (macOS 12+, Python 3.11+):
 
   python3 -m venv .venv && source .venv/bin/activate
   pip install -e .        # or: uv sync  (then prefix commands with `uv run`)

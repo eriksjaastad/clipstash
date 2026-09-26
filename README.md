@@ -31,7 +31,7 @@ tests/               pytest for the helper
 python3 -m helper       # serves on http://127.0.0.1:8787
 ```
 
-Full stranger setup (venv, `pip install -e .` / `uv sync`, `clipstashd`, troubleshooting) is in `clipstashd --help`; the `scripts/dev_up.sh` header has the one-shot clone/setup pointers. For a login LaunchAgent, follow the comments in `packaging/macos/com.clipstash.helper.plist`.
+Stranger install (macOS): Homebrew formula (`packaging/homebrew/README.md`) or single-binary scripts (`scripts/build_macos_binary.sh` then `scripts/install_macos_helper.sh`). Full stranger setup (venv, `pip install -e .` / `uv sync`, `clipstashd`, troubleshooting) is in `clipstashd --help`; the `scripts/dev_up.sh` header has the one-shot clone/setup pointers. For a login LaunchAgent, follow the comments in `packaging/macos/com.clipstash.helper.plist`.
 
 ## Load the extension (unpacked, MV3)
 
