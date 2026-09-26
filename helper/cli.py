@@ -10,6 +10,38 @@ from . import __version__
 from .config import effective_packet_root
 from .packets import export_csv
 
+_EPILOG = """\
+setup
+-----
+Requires macOS 12+, Python 3.11+, and Chrome (for the unpacked extension).
+
+  python3 -m venv .venv && source .venv/bin/activate
+  pip install -e .        # or: uv sync  (then prefix commands with `uv run`)
+
+Run the helper:
+  python -m helper        # module form, no install needed
+  clipstashd              # installed entry point (default command: serve)
+  ./scripts/dev_up.sh     # one-command dev env: venv + deps + serve
+
+Health check:
+  curl http://127.0.0.1:8787/health
+
+Extension:
+  chrome://extensions → Developer mode → Load unpacked → choose extension/.
+
+Save root:
+  Default ~/Clipstash/packets. Change it from the extension Options page
+  (writes ~/Clipstash/config.json) or with --root / CLIPSTASH_ROOT.
+
+Troubleshooting:
+  python3 not found         install Python 3.11+ (python.org or Homebrew)
+  port 8787 already in use  another clipstashd is running; stop it first
+  popup shows not running   check http://127.0.0.1:8787/health in Chrome and
+                            that no firewall blocks loopback
+  clipstashd not found      activate the venv, or use `uv run clipstashd`
+                            after `uv sync`
+"""
+
 
 def _env_bool(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
@@ -19,6 +51,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="clipstashd",
         description="Local clipstash helper: write packets and serve the extension.",
+        epilog=_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--version", action="version", version=f"clipstashd {__version__}")
     parser.add_argument(

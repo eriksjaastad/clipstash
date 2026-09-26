@@ -2,11 +2,28 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <!--
-  Template for a per-user LaunchAgent that starts the clipstash helper at
-  login. Copy to ~/Library/LaunchAgents/com.clipstash.helper.plist and replace
-  /usr/local/bin/clipstashd below with the output of `command -v clipstashd`
-  (with the helper's virtualenv active). See docs/install.md and the README
-  "Run the helper at login" section for install/unload steps.
+  Per-user LaunchAgent template that starts the clipstash helper at login.
+
+  Install:
+    1. With the helper's virtualenv active, find the entry point path:
+         command -v clipstashd
+    2. Copy this file into place and edit ProgramArguments below so it points
+       at that path (replace /usr/local/bin/clipstashd):
+         mkdir -p ~/Library/LaunchAgents
+         cp packaging/macos/com.clipstash.helper.plist ~/Library/LaunchAgents/
+         # edit ~/Library/LaunchAgents/com.clipstash.helper.plist
+    3. Load it:
+         launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.clipstash.helper.plist
+    4. Check health:
+         curl http://127.0.0.1:8787/health
+
+  Unload:
+    launchctl bootout gui/$(id -u)/com.clipstash.helper
+
+  The job runs at login only (RunAtLoad); launchd does not restart it if it
+  exits. For Photoshop Automation consent, grant the program named in
+  ProgramArguments (clipstashd) under System Settings → Privacy & Security →
+  Automation, or start clipstashd from Terminal once to approve Terminal.
 -->
 <dict>
   <key>Label</key>

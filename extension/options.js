@@ -1,5 +1,9 @@
-// clipstash options page: view and change the helper packet save root.
-// Talks to the local helper directly (host_permissions cover 127.0.0.1:8787).
+// clipstash options page.
+//
+// Views and edits the helper packet save root. Loads GET /config on open and
+// PUTs a new packet_root on submit; the helper persists it to
+// ~/Clipstash/config.json and applies it immediately. Talks to the local
+// helper directly (host_permissions cover 127.0.0.1:8787).
 
 const HELPER_BASE = "http://127.0.0.1:8787";
 
