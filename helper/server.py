@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import html
 import json
 import re
 from email.parser import BytesParser
@@ -168,6 +169,16 @@ def _burst_from_multipart(content_type: str, body: bytes) -> tuple[list[bytes], 
     return frames, _burst_metadata_from_fields(parsed["fields"])
 
 
+def _json_for_script(value: Any) -> str:
+    """JSON-serialize a value for safe embedding inside an inline <script>."""
+    return (
+        json.dumps(value)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+    )
+
+
 def _picker_html(session_id: str, meta: dict[str, Any]) -> str:
     frame_count = int(meta.get("frame_count") or 0)
     cards = "\n".join(
@@ -176,7 +187,7 @@ def _picker_html(session_id: str, meta: dict[str, Any]) -> str:
         f"</button>"
         for index in range(frame_count)
     )
-    meta_json = json.dumps(
+    meta_json = _json_for_script(
         {
             "title": meta.get("title") or "",
             "source_url": meta.get("source_url") or "",
@@ -185,6 +196,14 @@ def _picker_html(session_id: str, meta: dict[str, Any]) -> str:
             "timestamp_sec": meta.get("timestamp_sec"),
             "capture_method": meta.get("capture_method") or "burst_canvas",
         }
+    )
+    meta_text = html.escape(
+        json.dumps(
+            {
+                "title": meta.get("title") or "",
+                "url": meta.get("source_url") or "",
+            }
+        )[1:-1]
     )
     return f"""<!doctype html>
 <html lang="en">
@@ -225,13 +244,13 @@ def _picker_html(session_id: str, meta: dict[str, Any]) -> str:
   </head>
   <body>
     <h1>Burst &amp; pick — choose the best frame</h1>
-    <p class="meta">{json.dumps({"title": meta.get("title") or "", "url": meta.get("source_url") or ""})[1:-1]}</p>
+    <p class="meta">{meta_text}</p>
     <div class="grid">
 {cards}
     </div>
     <p id="status" class="status">Click a frame to save it as a packet.</p>
     <script>
-      const SESSION_ID = {json.dumps(session_id)};
+      const SESSION_ID = {_json_for_script(session_id)};
       const META = {meta_json};
 
       document.querySelectorAll(".frame").forEach((button) => {{

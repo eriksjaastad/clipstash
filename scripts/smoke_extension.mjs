@@ -219,13 +219,13 @@ async function runContent(url, doc) {
 
 // -- burst.js: canvas stepping, taint fallback, non-seekable -------------------
 
-function makeBurstVideo({ seekable = true } = {}) {
+function makeBurstVideo({ seekable = true, center = 10, paused = true } = {}) {
   const listeners = new Map();
-  let time = 10;
+  let time = center;
   const video = {
     videoWidth: 1280,
     videoHeight: 720,
-    paused: true,
+    paused,
     seekable: seekable
       ? { length: 1, start: () => 0, end: () => 300 }
       : { length: 0, start: () => 0, end: () => 0 },
@@ -255,7 +255,7 @@ function makeBurstVideo({ seekable = true } = {}) {
   return video;
 }
 
-function makeBurstDocument(video, { taint = false } = {}) {
+function makeBurstDocument(video, { taint = false, throwNonTaint = false } = {}) {
   const nodes = new Map([
     ["video", video],
     ["video.html5-main-video", null],
@@ -280,6 +280,9 @@ function makeBurstDocument(video, { taint = false } = {}) {
                 const error = new Error("The canvas has been tainted by cross-origin data.");
                 error.name = "SecurityError";
                 throw error;
+              }
+              if (throwNonTaint) {
+                throw new Error("InvalidStateError: the frame is not available");
               }
               drawnTimes.push(video.currentTime);
             },
@@ -331,6 +334,28 @@ async function runBurst(url, doc) {
   check(result.ok === true, "burst.js non-seekable path succeeds");
   check(result.frames.length === 1, "burst.js non-seekable captures single frame");
   check(result.captureMethod === "burst_canvas", "burst.js non-seekable labels burst_canvas");
+}
+
+{
+  // Near a seekable-range boundary, targets are clamped and duplicates dropped.
+  const video = makeBurstVideo({ center: 0.5 });
+  const doc = makeBurstDocument(video);
+  const result = await runBurst("https://www.youtube.com/watch?v=dQw4w9WgXcQ", doc);
+  check(result.ok === true, "burst.js boundary-clamped path succeeds");
+  check(result.frames.length === 12, "burst.js clamps targets to seekable range (12 unique)");
+  check(doc.drawnTimes[0] === 0, "burst.js clamps first target to seekable start");
+  check(Math.abs(doc.drawnTimes[11] - 1.55) < 1e-9, "burst.js keeps last clamped target");
+  check(Math.abs(video.currentTime - 0.5) < 1e-9, "burst.js restores center after clamping");
+}
+
+{
+  // A non-taint capture error must still restore playback state.
+  const video = makeBurstVideo({ paused: false });
+  const doc = makeBurstDocument(video, { throwNonTaint: true });
+  const result = await runBurst("https://www.youtube.com/watch?v=dQw4w9WgXcQ", doc);
+  check(result.ok === false, "burst.js reports non-taint capture errors");
+  check(video.paused === false, "burst.js restores playing state after capture error");
+  check(Math.abs(video.currentTime - 10) < 1e-9, "burst.js restores currentTime after capture error");
 }
 
 if (failures > 0) {

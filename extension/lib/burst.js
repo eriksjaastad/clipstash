@@ -40,7 +40,7 @@
     const canSeek = Boolean(video.seekable && video.seekable.length > 0);
     const offsets = [];
     for (let i = -N; i <= N; i += 1) offsets.push(i * STEP);
-    const targets = canSeek ? offsets.map((offset) => center + offset) : [center];
+    const targets = canSeek ? seekTargets(video, center, offsets) : [center];
     const wasPaused = video.paused;
 
     const frames = [];
@@ -52,25 +52,28 @@
       // Some embeds block pause(); keep going with whatever state we have.
     }
 
-    for (const target of targets) {
-      if (canSeek) await seekVideo(video, target);
-      try {
-        frames.push(captureFrame(video));
-      } catch (error) {
-        if (isCanvasTaintError(error)) {
-          tainted = true;
-          break;
-        }
-        throw error;
-      }
-    }
-
-    // Best-effort restore of playback position and state.
     try {
-      if (canSeek) await seekVideo(video, center);
-      if (!wasPaused) video.play();
-    } catch (_error) {
-      // Restore is best-effort only.
+      for (const target of targets) {
+        if (canSeek) await seekVideo(video, target);
+        try {
+          frames.push(captureFrame(video));
+        } catch (error) {
+          if (isCanvasTaintError(error)) {
+            tainted = true;
+            break;
+          }
+          throw error;
+        }
+      }
+    } finally {
+      // Best-effort restore of playback position and state, even when a
+      // non-taint capture error aborts the loop.
+      try {
+        if (canSeek) await seekVideo(video, center);
+        if (!wasPaused) video.play();
+      } catch (_error) {
+        // Restore is best-effort only.
+      }
     }
 
     if (tainted) {
@@ -134,6 +137,27 @@ function isCanvasTaintError(error) {
     error &&
       (error.name === "SecurityError" || /taint/i.test(String(error.message || error)))
   );
+}
+
+function seekTargets(video, center, offsets) {
+  const start = video.seekable.start(0);
+  const end = video.seekable.end(0);
+  const targets = [];
+  const seen = new Set();
+  for (const offset of offsets) {
+    const target = clamp(center + offset, start, end);
+    const key = Number.isFinite(target) ? target.toFixed(4) : String(target);
+    if (!seen.has(key)) {
+      seen.add(key);
+      targets.push(target);
+    }
+  }
+  return targets;
+}
+
+function clamp(value, min, max) {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min >= max) return value;
+  return Math.min(Math.max(value, min), max);
 }
 
 function seekVideo(video, time) {

@@ -404,3 +404,23 @@ def test_burst_session_expiry(monkeypatch):
     with pytest.raises(FileNotFoundError):
         load_session(session_id)
     assert not session_dir(session_id).exists()
+
+
+def test_burst_picker_escapes_metadata(server):
+    payload = make_burst_payload(frame_count=1)
+    payload["title"] = '<img src=x onerror="alert(1)">'
+    payload["source_url"] = 'https://example.com/v"</script><script>alert(2)</script>'
+    status, _, body = request(
+        server_url(server, "/bursts"),
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+    )
+    assert status == 201
+    session_id = json.loads(body)["session_id"]
+
+    status, _, body = request(server_url(server, f"/picker/{session_id}"))
+    assert status == 200
+    html = body.decode("utf-8")
+    assert '<img src=x' not in html
+    assert "&lt;img src=x" in html
+    assert "</script><script>alert(2)</script>" not in html
