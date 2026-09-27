@@ -268,3 +268,38 @@ def test_ffmpeg_burst_endpoint_bad_url_returns_502(server, monkeypatch) -> None:
     payload = json.loads(body)
     assert payload["ok"] is False
     assert "download failed" in payload["error"]
+
+def test_ytdlp_prefers_page_url_for_youtube(monkeypatch) -> None:
+    """YouTube CDN media URLs must not be handed to yt-dlp; use page_url."""
+    seen: list[str] = []
+
+    def fake_ytdlp(url: str, tmpdir: Path) -> Path:
+        seen.append(url)
+        target = tmpdir / "media.mp4"
+        target.write_bytes(FIXTURE.read_bytes())
+        return target
+
+    monkeypatch.setattr(ffmpeg_burst, "ytdlp_available", lambda: True)
+    monkeypatch.setattr(ffmpeg_burst, "_download_with_ytdlp", fake_ytdlp)
+    path = fetch_media_to_temp(
+        "https://googlevideo.com/videoplayback?expire=1",
+        site="youtube",
+        page_url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    )
+    try:
+        assert seen == ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"]
+        assert path.is_file()
+    finally:
+        shutil.rmtree(path.parent, ignore_errors=True)
+
+
+def test_ytdlp_fetch_url_helper_falls_back_to_media_url() -> None:
+    assert (
+        ffmpeg_burst._ytdlp_fetch_url(
+            "https://cdn.example.com/clip.mp4",
+            None,
+            "generic",
+        )
+        == "https://cdn.example.com/clip.mp4"
+    )
+

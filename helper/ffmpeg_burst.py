@@ -170,7 +170,29 @@ def _prefer_ytdlp(parsed, site: str) -> bool:
     if str(site or "").strip().lower() == "youtube":
         return True
     host = (parsed.hostname or "").lower()
-    return "youtube" in host or "googlevideo" in host
+    return "youtube" in host or "googlevideo" in host or host.endswith("youtu.be")
+
+
+def _ytdlp_fetch_url(media_url: str, page_url: str | None, site: str) -> str:
+    """URL to hand yt-dlp.
+
+    YouTube ``<video>.currentSrc`` is usually a signed googlevideo CDN URL.
+    yt-dlp wants the watch/page URL instead, so when *page_url* looks like a
+    YouTube page (or *site* is ``youtube``) prefer that. Otherwise fall back
+    to *media_url*.
+    """
+    page = str(page_url or "").strip()
+    if page:
+        parsed_page = urlparse(page)
+        if parsed_page.scheme in ("http", "https"):
+            host = (parsed_page.hostname or "").lower()
+            if (
+                "youtube" in host
+                or host.endswith("youtu.be")
+                or str(site or "").strip().lower() == "youtube"
+            ):
+                return page
+    return media_url
 
 
 def _download_with_ytdlp(media_url: str, tmpdir: Path) -> Path:
@@ -237,9 +259,10 @@ def fetch_media_to_temp(
 
     Prefers yt-dlp when *site* is ``youtube`` or the host looks like
     YouTube / googlevideo and yt-dlp is on PATH (optional subprocess
-    dependency, not a pip dep). Otherwise downloads with a plain HTTP GET
-    (User-Agent: clipstash). ``file://`` URLs are copied locally so tests can
-    stay hermetic. Raises :class:`FFmpegBurstError` on any failure; every
+    dependency, not a pip dep). When yt-dlp is used, *page_url* is preferred
+    over the signed CDN *media_url* for YouTube watch pages. Otherwise
+    downloads with a plain HTTP GET (User-Agent: clipstash). ``file://``
+    URLs are copied locally so tests can stay hermetic. Raises :class:`FFmpegBurstError` on any failure; every
     network/subprocess call is bounded by a timeout.
     """
     media_url = str(media_url or "").strip()
@@ -266,7 +289,9 @@ def fetch_media_to_temp(
     tmpdir = Path(tempfile.mkdtemp(prefix=TEMP_PREFIX))
     try:
         if _prefer_ytdlp(parsed, site) and ytdlp_available():
-            return _download_with_ytdlp(media_url, tmpdir)
+            return _download_with_ytdlp(
+                _ytdlp_fetch_url(media_url, page_url, site), tmpdir
+            )
         return _download_with_urllib(media_url, tmpdir)
     except Exception:
         shutil.rmtree(tmpdir, ignore_errors=True)
