@@ -10,6 +10,9 @@
 //   - burst.js canvas stepping (success), taint path (burst_visible_tab
 //     fallback signal, including cropRect and the video's mediaUrl), and
 //     non-seekable single-frame path
+//   - urls.js canonicalizeVideoUrl + isGreenCheckSite (remake matching;
+//     X canonicalize exists for capture but is never a green-check site)
+//   - captured-overlay.js badge application on a YT grid and the X no-op gate
 //
 // Stubs the minimal DOM surface the scripts touch; no browser needed.
 
@@ -20,6 +23,8 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const adaptersSrc = readFileSync(join(root, "extension/lib/adapters.js"), "utf8");
+const urlsSrc = readFileSync(join(root, "extension/lib/urls.js"), "utf8");
+const capturedOverlaySrc = readFileSync(join(root, "extension/lib/captured-overlay.js"), "utf8");
 const contentSrc = readFileSync(join(root, "extension/content.js"), "utf8");
 const burstSrc = readFileSync(join(root, "extension/lib/burst.js"), "utf8");
 const pickerBridgeSrc = readFileSync(join(root, "extension/lib/picker-bridge.js"), "utf8");
@@ -80,6 +85,10 @@ function loadAdapters(sandbox) {
   // The script's final expression is the assignment to globalThis.ClipStashAdapters,
   // so runInNewContext returns the adapter registry object directly.
   return runInNewContext(adaptersSrc, sandbox, { filename: "adapters.js" });
+}
+
+function loadUrls(sandbox) {
+  return runInNewContext(urlsSrc, sandbox, { filename: "urls.js" });
 }
 
 // -- adapter selection -----------------------------------------------------
@@ -157,6 +166,263 @@ async function extractFor(url, doc) {
   const info = await extractFor("https://example.com/watch?v=1", doc);
   check(info.title === "Generic page", "generic title from document.title");
   check(info.sourceUrl === "https://example.com/watch?v=1", "generic source_url is page URL");
+}
+
+// -- urls.js: canonicalizeVideoUrl + isGreenCheckSite (#7691) -----------------
+
+{
+  const sandbox = makeContext("https://www.youtube.com/watch?v=dQw4w9WgXcQ", makeDocument({}));
+  const urls = loadUrls(sandbox);
+  const canonicalize = (value) => urls.canonicalizeVideoUrl(value);
+
+  const cases = [
+    // [input, expected]
+    ["https://youtu.be/dQw4w9WgXcQ?si=abc", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
+    ["https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
+    ["https://www.youtube.com/shorts/abc123?feature=share", "https://www.youtube.com/watch?v=abc123"],
+    ["https://m.youtube.com/watch?v=dQw4w9WgXcQ&t=10", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
+    ["https://www.instagram.com/reel/CxYz123/?utm_source=x", "https://www.instagram.com/reel/CxYz123/"],
+    ["https://www.instagram.com/reels/CxYz123/", "https://www.instagram.com/reel/CxYz123/"],
+    ["https://www.instagram.com/p/CxYz123/", "https://www.instagram.com/p/CxYz123/"],
+    ["https://www.instagram.com/tv/CxYz123/", "https://www.instagram.com/tv/CxYz123/"],
+    ["https://www.tiktok.com/@someone/video/7300000000000000000?is_from_webapp=1", "https://www.tiktok.com/@someone/video/7300000000000000000"],
+    ["https://x.com/someone/status/1234567890123456789?s=20", "https://x.com/someone/status/1234567890123456789"],
+    ["https://twitter.com/someone/status/1234567890123456789", "https://x.com/someone/status/1234567890123456789"],
+    ["https://example.com/watch?v=1&x=2", "https://example.com/watch"],
+    ["not a url", ""],
+    ["ftp://example.com/file", ""],
+  ];
+  for (const [input, expected] of cases) {
+    check(canonicalize(input) === expected, `canonicalizeVideoUrl ${input} -> ${expected}`);
+  }
+
+  // Green-check site gate: YT/TikTok/IG yes, X/Twitter no.
+  const greenSites = [
+    "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "https://youtu.be/dQw4w9WgXcQ",
+    "https://m.youtube.com/@creator/videos",
+    "https://www.tiktok.com/@someone/video/7300000000000000000",
+    "https://www.instagram.com/reel/CxYz123/",
+  ];
+  for (const url of greenSites) {
+    check(urls.isGreenCheckSite(url) === true, `isGreenCheckSite true for ${url}`);
+  }
+  check(urls.isGreenCheckSite("https://x.com/someone/status/1234567890123456789") === false, "isGreenCheckSite false for x.com");
+  check(urls.isGreenCheckSite("https://twitter.com/someone/status/1234567890123456789") === false, "isGreenCheckSite false for twitter.com");
+  check(urls.isGreenCheckSite("https://example.com/watch?v=1") === false, "isGreenCheckSite false for non-green-check site");
+}
+
+{
+  // Matching: packet source_url + page_url variants share one canonical key
+  // with the grid href (remakes / shorts / query junk all collide).
+  const sandbox = makeContext("https://www.youtube.com/watch?v=dQw4w9WgXcQ", makeDocument({}));
+  const urls = loadUrls(sandbox);
+  const packets = [
+    { source_url: "https://youtu.be/dQw4w9WgXcQ", page_url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=1" },
+    { source_url: "https://www.tiktok.com/@someone/video/7300000000000000000", page_url: "https://www.tiktok.com/@someone/video/7300000000000000000" },
+    { source_url: "https://www.instagram.com/reels/CxYz123/", page_url: "https://www.instagram.com/reel/CxYz123/?utm_source=x" },
+  ];
+  const captured = new Set();
+  for (const packet of packets) {
+    for (const field of ["source_url", "page_url"]) {
+      const key = urls.canonicalizeVideoUrl(packet[field]);
+      if (key) captured.add(key);
+    }
+  }
+  check(captured.has("https://www.youtube.com/watch?v=dQw4w9WgXcQ"), "packet youtu.be/watch variants collapse to one YT key");
+  check(captured.has("https://www.tiktok.com/@someone/video/7300000000000000000"), "packet TikTok URL collapses to one key");
+  check(captured.has("https://www.instagram.com/reel/CxYz123/"), "packet reels/reel variants collapse to one IG key");
+  check(
+    captured.has(urls.canonicalizeVideoUrl("https://www.youtube.com/shorts/dQw4w9WgXcQ")),
+    "grid shorts href hits the same captured YT key"
+  );
+  check(
+    captured.has(urls.canonicalizeVideoUrl("https://www.instagram.com/reel/CxYz123/?utm_source=grid")),
+    "grid reel href hits the same captured IG key"
+  );
+}
+
+{
+  // adapters.js exposes the shared canonicalize + site gate when urls.js is loaded.
+  const sandbox = makeContext("https://www.youtube.com/watch?v=dQw4w9WgXcQ", makeDocument({}));
+  loadUrls(sandbox);
+  const adapters = loadAdapters(sandbox);
+  check(
+    adapters.canonicalizeVideoUrl("https://youtu.be/dQw4w9WgXcQ") === "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "ClipStashAdapters.canonicalizeVideoUrl delegates to ClipStashUrls"
+  );
+  check(adapters.isGreenCheckSite("https://www.tiktok.com/@a/video/1") === true, "ClipStashAdapters.isGreenCheckSite true for TikTok");
+  check(adapters.isGreenCheckSite("https://x.com/a/status/1") === false, "ClipStashAdapters.isGreenCheckSite false for X");
+}
+
+// -- captured-overlay.js: badge application + X no-op -------------------------
+
+function makeFakeAnchor(href) {
+  const classes = new Set();
+  const children = [];
+  const attrs = { href };
+  return {
+    href,
+    children,
+    classList: {
+      add(name) {
+        classes.add(name);
+      },
+      contains(name) {
+        return classes.has(name);
+      },
+    },
+    getAttribute(name) {
+      return Object.prototype.hasOwnProperty.call(attrs, name) ? attrs[name] : null;
+    },
+    setAttribute(name, value) {
+      attrs[name] = String(value);
+    },
+    appendChild(node) {
+      children.push(node);
+    },
+  };
+}
+
+function makeOverlayDocument(anchors) {
+  return {
+    body: {},
+    visibilityState: "visible",
+    addEventListener() {},
+    querySelectorAll(selector) {
+      return selector === "a[href]" ? anchors : [];
+    },
+    createElement(tag) {
+      if (tag !== "span") throw new Error(`unexpected createElement(${tag})`);
+      return makeFakeAnchor("");
+    },
+  };
+}
+
+{
+  const capturedAnchor = makeFakeAnchor("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+  const notCapturedAnchor = makeFakeAnchor("https://www.youtube.com/watch?v=zzzzzzzzzzz");
+  const doc = makeOverlayDocument([capturedAnchor, notCapturedAnchor]);
+  const sentMessages = [];
+  let observerCount = 0;
+  class FakeMutationObserver {
+    constructor(callback) {
+      this.callback = callback;
+      observerCount += 1;
+    }
+    observe() {}
+    disconnect() {}
+  }
+  const sandbox = {
+    console,
+    Promise,
+    Set,
+    URL,
+    setTimeout,
+    setInterval: () => 0,
+    location: { href: "https://www.youtube.com/results?search_query=banners", hostname: "www.youtube.com" },
+    document: doc,
+    window: { addEventListener() {} },
+    chrome: {
+      runtime: {
+        sendMessage: async (message) => {
+          sentMessages.push(message);
+          return { ok: true, urls: ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"] };
+        },
+      },
+    },
+    MutationObserver: FakeMutationObserver,
+  };
+  loadUrls(sandbox);
+  runInNewContext(capturedOverlaySrc, sandbox, { filename: "captured-overlay.js" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  check(observerCount === 1, "overlay installs one MutationObserver on a green-check site");
+  check(
+    sentMessages.length >= 1 && sentMessages[0].type === "GET_CAPTURED_URLS",
+    "overlay asks background for GET_CAPTURED_URLS"
+  );
+  check(capturedAnchor.getAttribute("data-clipstash-captured") === "1", "overlay marks the captured anchor");
+  check(
+    capturedAnchor.children.length === 1 && capturedAnchor.children[0].className === "clipstash-captured-check",
+    "overlay appends the clipstash-captured-check badge"
+  );
+  check(notCapturedAnchor.getAttribute("data-clipstash-captured") === null, "overlay leaves non-captured anchors unmarked");
+  check(notCapturedAnchor.children.length === 0, "overlay adds no badge to non-captured anchors");
+}
+
+{
+  // Relative grid hrefs (common on YouTube) must resolve against location.href
+  // before canonicalize, otherwise badges never match absolute packet URLs.
+  const capturedAnchor = makeFakeAnchor("/watch?v=dQw4w9WgXcQ");
+  const notCapturedAnchor = makeFakeAnchor("/watch?v=zzzzzzzzzzz");
+  const doc = makeOverlayDocument([capturedAnchor, notCapturedAnchor]);
+  const sentMessages = [];
+  class FakeMutationObserver {
+    constructor() {}
+    observe() {}
+    disconnect() {}
+  }
+  const sandbox = {
+    console,
+    Promise,
+    Set,
+    URL,
+    setTimeout,
+    setInterval: () => 0,
+    location: { href: "https://www.youtube.com/@creator/videos", hostname: "www.youtube.com" },
+    document: doc,
+    window: { addEventListener() {} },
+    chrome: {
+      runtime: {
+        sendMessage: async (message) => {
+          sentMessages.push(message);
+          return { ok: true, urls: ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"] };
+        },
+      },
+    },
+    MutationObserver: FakeMutationObserver,
+  };
+  loadUrls(sandbox);
+  runInNewContext(capturedOverlaySrc, sandbox, { filename: "captured-overlay.js" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  check(
+    capturedAnchor.getAttribute("data-clipstash-captured") === "1",
+    "overlay badges relative /watch?v= hrefs against absolute packet URLs"
+  );
+  check(notCapturedAnchor.getAttribute("data-clipstash-captured") === null, "overlay leaves unmatched relative hrefs unmarked");
+}
+
+{
+  // X / Twitter is out of scope: the overlay must no-op before touching the
+  // DOM, observers, or chrome messaging. The sandbox deliberately omits
+  // document / MutationObserver / setInterval, so any attempt to reach them
+  // throws and fails the test.
+  const sentMessages = [];
+  const sandbox = {
+    console,
+    Promise,
+    Set,
+    URL,
+    location: { href: "https://x.com/someone/status/1234567890123456789", hostname: "x.com" },
+    chrome: {
+      runtime: {
+        sendMessage: async (message) => {
+          sentMessages.push(message);
+          return { ok: true, urls: [] };
+        },
+      },
+    },
+  };
+  loadUrls(sandbox);
+  let threw = false;
+  try {
+    runInNewContext(capturedOverlaySrc, sandbox, { filename: "captured-overlay.js" });
+  } catch (_error) {
+    threw = true;
+  }
+  check(threw === false, "overlay no-ops cleanly on x.com");
+  check(sentMessages.length === 0, "overlay never messages background on x.com");
 }
 
 // -- content.js: canvas success and taint fallback ---------------------------

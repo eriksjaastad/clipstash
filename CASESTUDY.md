@@ -114,7 +114,7 @@ Install aims at “boring for strangers”: Homebrew formula and/or a local PyIn
 - ~~Web-safe still / layer names (adapter defaults for the four sites + optional type-in we always slugify).~~ Landed: `helper/slug.py` + popup "Still name" field; stills are `<slug>.png`.
 - ~~Packets organized by **site folder** (e.g. YouTube/…) with stills named from the **video title** (web-safe), so a folder listing is readable and the YAML still holds the page URL for remakes.~~ Landed: packets live at `~/Clipstash/packets/<site>/<id>/`.
 - Export polish around that YAML → CSV / spreadsheet story.
-- Creator video-grid overlay: **green check** on thumbnails already in the packet log (huge when you are making ~100 per category — we had a version of this in the original private tool).
+- ~~Creator video-grid overlay: **green check** on thumbnails already in the packet log (huge when you are making ~100 per category — we had a version of this in the original private tool).~~ Landed (#7691): green check on YouTube / TikTok / Instagram grid thumbs, matched by canonical URL against `GET /packets`; X/Twitter stays out of scope.
 
 The extract rule that kept us honest: **rewrite for the packet model; do not scrub-and-push the private tree.** Then grow the public tool toward the batch workflow the case study describes.
 
@@ -140,7 +140,7 @@ The product lesson: **end a client job by naming the transferable object** (here
 - Homebrew / single-binary install story
 - MIT license, public GitHub, no client data in tree
 
-v1 is the capture + packet core. Site folders and title-slug still names have shipped; remaining “banner factory” follow-on work (grid checks, richer export) stays on the backlog — update the code to match this case study as those cards ship.
+v1 is the capture + packet core. Site folders, title-slug still names, and the green-check grid overlay have shipped; remaining “banner factory” follow-on work (richer export) stays on the backlog — update the code to match this case study as those cards ship.
 
 ---
 

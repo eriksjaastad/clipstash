@@ -13,6 +13,17 @@
       "matches": ["http://127.0.0.1:8787/picker/*"],
       "js": ["lib/picker-bridge.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://*.youtube.com/*",
+        "*://youtu.be/*",
+        "*://*.tiktok.com/*",
+        "*://*.instagram.com/*"
+      ],
+      "js": ["lib/urls.js", "lib/adapters.js", "lib/captured-overlay.js"],
+      "css": ["lib/captured-overlay.css"],
+      "run_at": "document_idle"
     }
   ],
   "action": {

@@ -11,6 +11,12 @@
 // Injected into pages by background.js; exposed as
 // `globalThis.ClipStashAdapters` for content.js. The first matching adapter
 // wins; the generic adapter is the always-matching fallback of last resort.
+//
+// The public `canonicalizeVideoUrl` / `isGreenCheckSite` exports used by the
+// #7691 green-check overlay delegate to `globalThis.ClipStashUrls` from
+// `lib/urls.js` (the single shared canonicalize copy), so load urls.js before
+// calling them. The private per-site canonical helpers below stay the capture
+// path and are intentionally unchanged.
 
 globalThis.ClipStashAdapters = (() => {
   const registry = [];
@@ -233,6 +239,14 @@ globalThis.ClipStashAdapters = (() => {
     register,
     adapt,
     adapters: registry,
+    canonicalizeVideoUrl(url) {
+      const urls = globalThis.ClipStashUrls;
+      return urls ? urls.canonicalizeVideoUrl(url) : "";
+    },
+    isGreenCheckSite(url) {
+      const urls = globalThis.ClipStashUrls;
+      return urls ? urls.isGreenCheckSite(url) : false;
+    },
     ids: {
       youtube: youtube.id,
       x: x.id,
