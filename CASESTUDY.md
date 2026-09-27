@@ -7,7 +7,7 @@ Companion plan: [PLAN.md](./PLAN.md). Known limits and deferred ideas: [ISSUES.m
 
 ![Side-by-side: manual banner workflow vs clipstash](./assets/case-study-savings.svg)
 
-*Savings grow with volume. At five banners the tool helps; at a hundred per category it compounds.*
+*Create banner (−) is the same either way. The hotkey removes the filing and spreadsheet steps.*
 
 ---
 
@@ -19,29 +19,36 @@ That is not a one-off screenshot. It is a **batch** job. The more you have to ma
 
 ---
 
-## Without a tool (the expensive loop)
+## Without the tool
 
-For each video you would typically:
+1. Find the video
+2. Take a screenshot
+3. Screenshot lands wherever the OS put it
+4. Drag the file into Photoshop
+5. Create banner (−)
+6. Export
+7. Type the name when you save (into the folder you already set up)
+8. Paste the image name into Excel
+9. Copy the video page URL and paste that into Excel too
 
-1. Open the video page, scrub to a usable moment, take a screenshot.
-2. Open image software (Photoshop), place the still, name the layer somehow.
-3. Drag it into your template / layer mask, finish the banner, export.
-4. Try to remember or re-find the page URL when the client wants a remake.
-5. Maintain your own YAML / spreadsheet / notes so the run is auditable.
-
-Repeat across four sites and dozens or hundreds of videos. Context switches, naming drift, and lost provenance are the real cost — not the single click of “screenshot.”
+Repeat across YouTube, TikTok, Instagram, and Twitter/X — and across dozens or hundreds of videos. The slow part is not the creative work. It is everything around it.
 
 ---
 
-## With clipstash (the loop we kept)
+## With clipstash
 
-1. Go to a video page and trigger capture (burst around the pause).
-2. Pick the frame from a short review screen.
-3. The helper writes a **packet**: still + `record.yaml` (title, page URL, source URL, site, capture method, …).
-4. Optional Photoshop place puts the still into the frontmost document as a layer (finish / export stays yours — we did not build the catalogue finish pipeline into the public tool).
-5. As you go, the packet log is the run record; export to CSV (and from there Excel or whatever you need).
+Simple path (good when you can pause on the frame you want):
 
-Clipboard history in the extension is a convenience. The **packet** is the source of truth.
+1. Open the video URL
+2. Hotkey → still saved, organized, URL logged, optional place into Photoshop
+3. Create banner (−)
+4. Export
+
+Create banner is the same either way (−). What the tool removes is screenshot filing, dragging into Photoshop, naming, and the Excel name/URL bookkeeping. Fast, and it keeps its own record.
+
+**Optional:** burst / bracket frames around the pause when the moment is hard (blink, mid-motion). Not required when the pause is already right — short clips often are. Case study default is the hotkey path; burst is the extra.
+
+Clipboard history in the extension is a convenience. The **packet** is the source of truth:
 
 ```text
 ~/Clipstash/packets/<id>/
@@ -49,18 +56,15 @@ Clipboard history in the extension is a convenience. The **packet** is the sourc
   record.yaml   # title, URLs, site, capture_method, timestamp, …
 ```
 
-Site adapters (YouTube, X, Instagram, TikTok, plus a generic fallback) own “what is the title and canonical URL on this page?” Capture code owns “get me a still.” Keeping those separate is what turned a client-specific grabber into something strangers can extend.
+Site adapters (YouTube, X, Instagram, TikTok, plus a generic fallback) own title and URL for each site. Capture code owns the still.
 
 ---
 
 ## Why volume is the point
 
-| Batch size | What you feel |
-|------------|----------------|
-| ~5 banners | Some time saved; nice to have |
-| ~100 / category | Capture, naming, and “click back to remake” stop being the bottleneck |
+At five banners, the tool saves some time. At a hundred per category, the filing and spreadsheet steps are what would have burned the day — and those are exactly what the hotkey removes.
 
-We built (and used) this class of tool when the assignment was large. The case for clipstash is not “one prettier screenshot.” It is **repeatable provenance at scale**: still, title, URL, and a log you can export — every time.
+We used this kind of tool on large assignments. The point is not a prettier screenshot. It is still + title + URL written down for you, every time, so remakes and exports are not a scavenger hunt.
 
 ---
 

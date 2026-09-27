@@ -1,31 +1,29 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="960" height="420" viewBox="0 0 960 420" role="img" aria-labelledby="title desc">
-  <title id="title">Manual banner workflow vs clipstash</title>
-  <desc id="desc">Side-by-side comparison: many slow manual steps versus fewer capture and packet steps. Savings grow with volume.</desc>
-  <rect width="960" height="420" fill="#0f1419"/>
-  <text x="480" y="36" text-anchor="middle" fill="#e7ecf1" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="700">Where the time goes — making ~100 creator banners</text>
-  <text x="480" y="58" text-anchor="middle" fill="#8b9aab" font-family="Helvetica, Arial, sans-serif" font-size="12">Savings grow with volume. At 5 banners it helps; at 100 it compounds.</text>
-
-  <!-- Left: manual -->
-  <rect x="40" y="80" width="420" height="300" rx="12" fill="#1a222c" stroke="#3d4a58"/>
-  <text x="250" y="110" text-anchor="middle" fill="#ff8a7a" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700">Without clipstash</text>
-  <text x="60" y="142" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">1. Open video · scrub · screenshot</text>
-  <text x="60" y="168" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">2. Save file · rename somehow</text>
-  <text x="60" y="194" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">3. Open Photoshop · place · name layer</text>
-  <text x="60" y="220" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">4. Mask / template · export</text>
-  <text x="60" y="246" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">5. Hunt the URL when you need a remake</text>
-  <text x="60" y="272" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">6. Keep your own spreadsheet / notes</text>
-  <text x="60" y="310" fill="#8b9aab" font-family="Helvetica, Arial, sans-serif" font-size="12">Repeat × 100 across YT / TikTok / IG / X</text>
-  <text x="60" y="340" fill="#ff8a7a" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="700">Cost: context switches + lost links + naming drift</text>
-
-  <!-- Right: clipstash -->
-  <rect x="500" y="80" width="420" height="300" rx="12" fill="#12261c" stroke="#2f6b4f"/>
-  <text x="710" y="110" text-anchor="middle" fill="#6dcea0" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700">With clipstash</text>
-  <text x="520" y="142" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">1. Hotkey on the video page</text>
-  <text x="520" y="168" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">2. Pick the frame from a short burst</text>
-  <text x="520" y="194" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">3. Packet written: still + title + URL (YAML)</text>
-  <text x="520" y="220" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">4. Optional: place into Photoshop as a layer</text>
-  <text x="520" y="246" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">5. Finish mask / export in your template</text>
-  <text x="520" y="272" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">6. Log is already CSV-exportable</text>
-  <text x="520" y="310" fill="#8b9aab" font-family="Helvetica, Arial, sans-serif" font-size="12">Same loop · four sites · link always in the packet</text>
-  <text x="520" y="340" fill="#6dcea0" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="700">Savings: capture + naming + provenance at scale</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="520" viewBox="0 0 960 520" role="img" aria-labelledby="title desc">
+  <title id="title">Without clipstash vs with clipstash</title>
+  <desc id="desc">Nine manual steps versus open URL, hotkey, create banner, and export. Create banner is the same either way.</desc>
+  <rect width="960" height="520" fill="#0f1419"/>
+  <text x="480" y="32" text-anchor="middle" fill="#e7ecf1" font-family="Helvetica, Arial, sans-serif" font-size="17" font-weight="700">What the hotkey removes</text>
+  <text x="480" y="52" text-anchor="middle" fill="#8b9aab" font-family="Helvetica, Arial, sans-serif" font-size="12">Create banner (−) is the same either way. Everything else in the left column is filing and bookkeeping.</text>
+  <rect x="28" y="72" width="440" height="420" rx="12" fill="#1a222c" stroke="#3d4a58"/>
+  <text x="248" y="100" text-anchor="middle" fill="#ff8a7a" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700">Without the tool</text>
+  <text x="48" y="132" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">1. Find the video</text>
+  <text x="48" y="158" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">2. Take a screenshot</text>
+  <text x="48" y="184" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">3. Find where the screenshot was saved</text>
+  <text x="48" y="210" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">4. Drag the file into Photoshop</text>
+  <text x="48" y="236" fill="#8b9aab" font-family="Helvetica, Arial, sans-serif" font-size="13">5. Create banner (−)</text>
+  <text x="48" y="262" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">6. Export</text>
+  <text x="48" y="288" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">7. Type the name when you save</text>
+  <text x="48" y="314" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">8. Paste the image name into Excel</text>
+  <text x="48" y="340" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">9. Copy the video URL into Excel</text>
+  <text x="48" y="390" fill="#8b9aab" font-family="Helvetica, Arial, sans-serif" font-size="12">Repeat for every video across sites.</text>
+  <text x="48" y="450" fill="#ff8a7a" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="700">You own every filing step.</text>
+  <rect x="492" y="72" width="440" height="420" rx="12" fill="#12261c" stroke="#2f6b4f"/>
+  <text x="712" y="100" text-anchor="middle" fill="#6dcea0" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700">With clipstash</text>
+  <text x="512" y="150" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">1. Open the video URL</text>
+  <text x="512" y="176" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">2. Hotkey (save, organize, log, place)</text>
+  <text x="512" y="202" fill="#8b9aab" font-family="Helvetica, Arial, sans-serif" font-size="13">3. Create banner (−)</text>
+  <text x="512" y="228" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">4. Export</text>
+  <text x="512" y="290" fill="#8b9aab" font-family="Helvetica, Arial, sans-serif" font-size="12">Still, title, and URL are already in the packet.</text>
+  <text x="512" y="314" fill="#8b9aab" font-family="Helvetica, Arial, sans-serif" font-size="12">Burst frames are optional when the pause is hard.</text>
+  <text x="512" y="450" fill="#6dcea0" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="700">Filing and the spreadsheet row are done for you.</text>
 </svg>
