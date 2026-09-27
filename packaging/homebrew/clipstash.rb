@@ -10,6 +10,9 @@ class Clipstash < Formula
   head "https://github.com/eriksjaastad/clipstash.git", branch: "main"
 
   depends_on "python@3.12"
+  # Native burst extraction (cross-origin video) shells out to ffmpeg. Light
+  # enough for this personal tap, so declare it as a hard dependency.
+  depends_on "ffmpeg"
 
   def install
     venv = virtualenv_create(libexec, "python3.12")
@@ -28,6 +31,9 @@ class Clipstash < Formula
     <<~EOS
       LaunchAgent template installed to:
         #{opt_pkgshare}/com.clipstash.helper.plist
+
+      Native burst needs ffmpeg (installed by this formula). YouTube signed
+      media URLs work better with yt-dlp on PATH: brew install yt-dlp
 
       Install as a per-user LaunchAgent:
         cp #{opt_pkgshare}/com.clipstash.helper.plist ~/Library/LaunchAgents/

@@ -11,6 +11,8 @@ Binds 127.0.0.1 only. Endpoints:
   GET  /packets             -> list packet summaries
   GET  /export.csv          -> CSV of all packets
   POST /bursts              -> create a burst session, return {session_id, picker_url}
+  POST /bursts/ffmpeg       -> create a native ffmpeg burst from a media URL
+                               (tainted-canvas path; ffmpeg on PATH required)
   GET  /picker/<id>         -> HTML grid of burst frames
   GET  /picker/<id>/frame/N -> PNG for frame N
   POST /picker/<id>/choose  -> write chosen frame as a normal packet
@@ -58,6 +60,7 @@ from .config import (
     save_config,
 )
 from .crop import apply_crop_rect
+from .ffmpeg_burst import FFmpegBurstError, burst_frames_from_url, ffmpeg_available
 from .packets import (
     export_csv,
     image_path as packet_image_path,
@@ -458,6 +461,9 @@ class ClipStashHandler(BaseHTTPRequestHandler):
             if path == "/bursts":
                 self._create_burst_session(content_type, body)
                 return
+            if path == "/bursts/ffmpeg":
+                self._create_ffmpeg_burst_session(body)
+                return
             match = re.fullmatch(r"/packets/([^/]+)/place-photoshop", path)
             if match:
                 self._place_packet_in_photoshop(match.group(1))
@@ -471,6 +477,8 @@ class ClipStashHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": False, "error": str(exc)}, 400)
         except FileNotFoundError as exc:
             self._send_json({"ok": False, "error": str(exc)}, 404)
+        except FFmpegBurstError as exc:
+            self._send_json({"ok": False, "error": str(exc)}, 502)
         except Exception as exc:  # pragma: no cover - last-resort guard
             self._send_json({"ok": False, "error": f"internal error: {exc}"}, 500)
 
@@ -558,6 +566,54 @@ class ClipStashHandler(BaseHTTPRequestHandler):
                 "session_id": session_id,
                 "picker_url": self._picker_url(session_id),
                 "frame_count": int(meta.get("frame_count") or 0),
+            },
+            201,
+        )
+
+    def _create_ffmpeg_burst_session(self, body: bytes) -> None:
+        """Create a native multi-frame burst from a media URL (JSON only).
+
+        The extension calls this when its in-page canvas burst is tainted and
+        the video element exposes a media URL. Requires ffmpeg on PATH;
+        otherwise responds 503 so the extension falls back to its single
+        visible-tab still (``burst_visible_tab``).
+        """
+        payload = json.loads(body.decode("utf-8") or "{}")
+        if not isinstance(payload, dict):
+            raise ValueError("expected a JSON object")
+        media_url = str(payload.get("media_url") or "").strip()
+        if not media_url:
+            raise ValueError("media_url is required")
+        if not ffmpeg_available():
+            self._send_json(
+                {"ok": False, "error": "ffmpeg not found on PATH (brew install ffmpeg)"},
+                503,
+            )
+            return
+        frames = burst_frames_from_url(
+            media_url,
+            payload.get("timestamp_sec"),
+            site=str(payload.get("site") or "generic"),
+            page_url=payload.get("page_url") or None,
+        )
+        metadata = {
+            "title": str(payload.get("title") or ""),
+            "source_url": str(payload.get("source_url") or ""),
+            "page_url": str(payload.get("page_url") or payload.get("source_url") or ""),
+            "site": str(payload.get("site") or "generic"),
+            "timestamp_sec": _optional_float(payload.get("timestamp_sec")),
+            "capture_method": "burst_ffmpeg",
+            "photoshop": _as_bool(payload.get("photoshop")),
+        }
+        meta = create_burst(frames, metadata)
+        session_id = str(meta["session_id"])
+        self._send_json(
+            {
+                "ok": True,
+                "session_id": session_id,
+                "picker_url": self._picker_url(session_id),
+                "frame_count": int(meta.get("frame_count") or 0),
+                "capture_method": "burst_ffmpeg",
             },
             201,
         )

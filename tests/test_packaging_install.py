@@ -26,6 +26,9 @@ def test_homebrew_formula_exists_and_wires_clipstashd() -> None:
     assert "clipstashd" in formula
     assert "Virtualenv" in formula or "virtualenv_create" in formula
     assert "com.clipstash.helper" in formula
+    # Native burst extraction shells out to ffmpeg; the formula installs it.
+    assert 'depends_on "ffmpeg"' in formula
+    assert "brew install yt-dlp" in formula
 
 
 def test_binary_build_and_install_scripts_exist_and_are_executable() -> None:

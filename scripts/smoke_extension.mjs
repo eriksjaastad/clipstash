@@ -8,7 +8,8 @@
 //   - content.js canvas path (success) and taint path (visible_tab fallback
 //     signal returned to background.js, including cropRect)
 //   - burst.js canvas stepping (success), taint path (burst_visible_tab
-//     fallback signal, including cropRect), and non-seekable single-frame path
+//     fallback signal, including cropRect and the video's mediaUrl), and
+//     non-seekable single-frame path
 //
 // Stubs the minimal DOM surface the scripts touch; no browser needed.
 
@@ -238,6 +239,8 @@ function makeBurstVideo({ seekable = true, center = 10, paused = true } = {}) {
     videoWidth: 1280,
     videoHeight: 720,
     paused,
+    currentSrc: "https://r1---sn-abc.googlevideo.com/videoplayback?expire=123",
+    src: "https://r1---sn-abc.googlevideo.com/videoplayback?expire=123",
     seekable: seekable
       ? { length: 1, start: () => 0, end: () => 300 }
       : { length: 0, start: () => 0, end: () => 0 },
@@ -338,6 +341,10 @@ async function runBurst(url, doc) {
   check(result.captureMethod === "burst_visible_tab", "burst.js signals burst_visible_tab fallback");
   check(result.title === "Burst test", "burst.js keeps metadata on taint");
   check(result.sourceUrl === "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "burst.js keeps source_url on taint");
+  check(
+    result.mediaUrl === "https://r1---sn-abc.googlevideo.com/videoplayback?expire=123",
+    "burst.js taint signal includes mediaUrl from video.currentSrc"
+  );
   check(
     result.cropRect &&
       result.cropRect.x === 8 &&

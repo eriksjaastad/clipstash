@@ -5,6 +5,10 @@ The in-repo formula `clipstash.rb` installs the `clipstashd` entry point
 deps into a Homebrew-managed virtualenv). `brew install` needs network access
 to fetch those deps from PyPI.
 
+Native burst extraction (cross-origin video) needs `ffmpeg`; the formula
+installs it, and YouTube signed media URLs work better with `yt-dlp` on PATH
+(`brew install yt-dlp`).
+
 Install the latest `main` (HEAD):
 
 ```bash
