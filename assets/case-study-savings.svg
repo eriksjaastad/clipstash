@@ -1,9 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="520" viewBox="0 0 960 520" role="img" aria-labelledby="title desc">
   <title id="title">Without clipstash vs with clipstash</title>
-  <desc id="desc">Nine manual steps versus open URL, hotkey, create banner, and export. Create banner is the same either way.</desc>
+  <desc id="desc">Nine manual steps versus a capture hotkey for paperwork, then create banner and export later.</desc>
   <rect width="960" height="520" fill="#0f1419"/>
   <text x="480" y="32" text-anchor="middle" fill="#e7ecf1" font-family="Helvetica, Arial, sans-serif" font-size="17" font-weight="700">What the hotkey removes</text>
-  <text x="480" y="52" text-anchor="middle" fill="#8b9aab" font-family="Helvetica, Arial, sans-serif" font-size="12">Create banner (−) is the same either way. Everything else in the left column is filing and bookkeeping.</text>
+  <text x="480" y="52" text-anchor="middle" fill="#8b9aab" font-family="Helvetica, Arial, sans-serif" font-size="12">The hotkey does the paperwork. Create banner (−) can wait for a later pass.</text>
   <rect x="28" y="72" width="440" height="420" rx="12" fill="#1a222c" stroke="#3d4a58"/>
   <text x="248" y="100" text-anchor="middle" fill="#ff8a7a" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700">Without the tool</text>
   <text x="48" y="132" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">1. Find the video</text>
@@ -19,11 +19,13 @@
   <text x="48" y="450" fill="#ff8a7a" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="700">You own every filing step.</text>
   <rect x="492" y="72" width="440" height="420" rx="12" fill="#12261c" stroke="#2f6b4f"/>
   <text x="712" y="100" text-anchor="middle" fill="#6dcea0" font-family="Helvetica, Arial, sans-serif" font-size="15" font-weight="700">With clipstash</text>
-  <text x="512" y="150" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">1. Open the video URL</text>
-  <text x="512" y="176" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">2. Hotkey (save, organize, log, place)</text>
-  <text x="512" y="202" fill="#8b9aab" font-family="Helvetica, Arial, sans-serif" font-size="13">3. Create banner (−)</text>
-  <text x="512" y="228" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">4. Export</text>
-  <text x="512" y="290" fill="#8b9aab" font-family="Helvetica, Arial, sans-serif" font-size="12">Still, title, and URL are already in the packet.</text>
-  <text x="512" y="314" fill="#8b9aab" font-family="Helvetica, Arial, sans-serif" font-size="12">Burst frames are optional when the pause is hard.</text>
-  <text x="512" y="450" fill="#6dcea0" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="700">Filing and the spreadsheet row are done for you.</text>
+  <text x="512" y="140" fill="#8b9aab" font-family="Helvetica, Arial, sans-serif" font-size="12">Capture pass</text>
+  <text x="512" y="166" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">1. Open the video URL</text>
+  <text x="512" y="192" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">2. Hotkey (save, name, YAML log)</text>
+  <text x="512" y="240" fill="#8b9aab" font-family="Helvetica, Arial, sans-serif" font-size="12">Later — marketing pass</text>
+  <text x="512" y="266" fill="#8b9aab" font-family="Helvetica, Arial, sans-serif" font-size="13">3. Create banner (−)</text>
+  <text x="512" y="292" fill="#c5d0db" font-family="Helvetica, Arial, sans-serif" font-size="13">4. Export</text>
+  <text x="512" y="350" fill="#8b9aab" font-family="Helvetica, Arial, sans-serif" font-size="12">Batch captures first if you want.</text>
+  <text x="512" y="374" fill="#8b9aab" font-family="Helvetica, Arial, sans-serif" font-size="12">Come back for image work when ready.</text>
+  <text x="512" y="450" fill="#6dcea0" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="700">Paperwork is done on the hotkey.</text>
 </svg>
