@@ -7,7 +7,7 @@ Companion plan: [PLAN.md](./PLAN.md). Known limits and deferred ideas: [ISSUES.m
 
 ![Side-by-side: manual banner workflow vs clipstash](./assets/case-study-savings.svg)
 
-*The hotkey does the paperwork (named still + YAML). Create banner (−) can wait for a later pass.*
+*Top: push MAKE (the hotkey). Bottom: write it down, again and again. Create banner (−) is the same later either way.*
 
 ---
 
