@@ -62,7 +62,7 @@ v1 capture ladder:
 | Helper ffmpeg burst | Tainted burst: fetch media (yt-dlp for watch URLs when available) → ±7 × 0.15s PNGs → picker |
 | Visible-tab + crop | Fallback: full-tab shot cropped to the video’s on-screen rect |
 
-Install aims at “boring for strangers”: Homebrew formula and/or a PyInstaller single binary plus LaunchAgent. Signing and notarization matter only if you publish a **downloaded** prebuilt binary; brew/source builds avoid that Gatekeeper path for now.
+Install aims at “boring for strangers”: Homebrew formula and/or a local PyInstaller single binary plus LaunchAgent. We are **not** joining the Apple Developer Program or notarizing downloadables; brew/source (and local unsigned builds) are the supported paths.
 
 ---
 
@@ -101,7 +101,7 @@ That process detail matters less than the product lesson: **end a client job by 
 - Homebrew / single-binary install story
 - MIT license, public GitHub, no client data in tree
 
-Optional later: notarized GitHub Release binaries, quality-scoring as a separate pack, other OSes, Store listing.
+Optional later: quality-scoring as a separate pack, other OSes, Store listing. Notarized GitHub Release binaries are out of scope without an Apple Developer Program membership.
 
 ---
 
@@ -111,6 +111,6 @@ Optional later: notarized GitHub Release binaries, quality-scoring as a separate
 2. Name the source-of-truth artifact (ours is the packet folder + record).
 3. Draw a hard “never publish” list on day one.
 4. Prefer adapters and capture modes you can explain in a table over a monolith grab script.
-5. Ship a stranger install path before you polish platform edge cases (TCC, notarization, Store).
+5. Ship a stranger install path before you polish platform edge cases (TCC, Store). Skip paid Apple notarization unless you need downloaded prebuilts.
 
 clipstash exists because the client work ended — and because the still + title + URL habit did not.
