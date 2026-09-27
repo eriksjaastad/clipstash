@@ -43,6 +43,10 @@ Scripts receive the image path via ``on run argv`` (never string-interpolated),
 so paths with quotes/spaces are safe. Each script is allowed up to 120 s; a
 busy Photoshop reports a timeout instead of hanging.
 
+The still arrives as ``<slug>.png`` under ``<root>/<site>/<id>/`` (see
+``helper.packets``), so ``open``/``duplicate`` layers inherit the slug
+basename automatically — no extra layer-naming step is needed here.
+
 macOS permissions (TCC / Automation)
 ------------------------------------
 The first time the helper tells Photoshop what to do, macOS asks whether the

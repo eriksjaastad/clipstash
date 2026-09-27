@@ -44,7 +44,9 @@ CLIPSTASH_PHOTOSHOP enable auto-place when set to 1/true/yes/on, same as
 
 Save root
 ---------
-Packets default to ``~/Clipstash/packets``. Change the root from the
+Packets default to ``~/Clipstash/packets/<site>/<id>/<slug>.png`` +
+``record.yaml`` (``<site>`` = youtube | tiktok | instagram | x | generic;
+``<slug>`` = slugified video title or popup type-in). Change the root from the
 extension Options page (writes ``~/Clipstash/config.json``) or with
 ``--root`` / ``CLIPSTASH_ROOT``.
 

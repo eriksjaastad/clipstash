@@ -366,10 +366,12 @@ def test_post_packet_photoshop_flag_places(server, tmp_path, monkeypatch):
     assert payload["photoshop"] == {
         "ok": True,
         "placed": True,
-        "image": str(tmp_path / payload["packet"]["id"] / "still.png"),
+        "image": str(
+            tmp_path / "youtube" / payload["packet"]["id"] / "photoshop-packet.png"
+        ),
         "method": "mock",
     }
-    assert calls == [tmp_path / payload["packet"]["id"] / "still.png"]
+    assert calls == [tmp_path / "youtube" / payload["packet"]["id"] / "photoshop-packet.png"]
 
 
 def test_post_packet_without_flag_does_not_place(server, monkeypatch):
@@ -403,7 +405,7 @@ def test_place_photoshop_endpoint(server, tmp_path, monkeypatch):
     assert payload["ok"] is True
     assert payload["packet_id"] == packet_id
     assert payload["photoshop"]["ok"] is True
-    assert calls == [tmp_path / packet_id / "still.png"]
+    assert calls == [tmp_path / "youtube" / packet_id / "photoshop-packet.png"]
 
 
 def test_place_photoshop_endpoint_missing_packet_404(server, monkeypatch):
@@ -441,10 +443,10 @@ def test_burst_session_stores_flag_and_choose_places(server, tmp_path, monkeypat
     assert payload["photoshop"] == {
         "ok": True,
         "placed": True,
-        "image": str(tmp_path / packet_id / "still.png"),
+        "image": str(tmp_path / "youtube" / packet_id / "photoshop-burst.png"),
         "method": "mock",
     }
-    assert calls == [tmp_path / packet_id / "still.png"]
+    assert calls == [tmp_path / "youtube" / packet_id / "photoshop-burst.png"]
 
 
 def test_burst_choose_without_flag_does_not_place(server, monkeypatch):
@@ -482,7 +484,9 @@ def test_server_auto_photoshop_places_without_request_flag(tmp_path, monkeypatch
         assert status == 201
         payload = json.loads(body)
         assert payload["photoshop"]["ok"] is True
-        assert calls == [tmp_path / payload["packet"]["id"] / "still.png"]
+        assert calls == [
+            tmp_path / "youtube" / payload["packet"]["id"] / "photoshop-packet.png"
+        ]
     finally:
         httpd.shutdown()
         thread.join(timeout=5)

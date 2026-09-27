@@ -1,11 +1,8 @@
 """Generate the synthetic demo packet under examples/packets."""
 
 import base64
-from pathlib import Path
 
-import yaml
-
-from helper.packets import new_record, packet_dir
+from helper.packets import new_record, write_packet
 
 PNG_1PX = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
@@ -24,10 +21,5 @@ record = new_record(
     created_at="2026-09-25T12:00:00+00:00",
 )
 
-directory = packet_dir("examples/packets", record["id"])
-directory.mkdir(parents=True, exist_ok=True)
-(directory / "still.png").write_bytes(base64.b64decode(PNG_1PX))
-(directory / "record.yaml").write_text(
-    yaml.safe_dump(record, sort_keys=False, allow_unicode=True), encoding="utf-8"
-)
-print(f"wrote {directory}")
+written = write_packet(record, base64.b64decode(PNG_1PX), root="examples/packets")
+print(f"wrote examples/packets/{written['site']}/{written['id']}/{written['image']}")

@@ -6,6 +6,8 @@ Binds 127.0.0.1 only. Endpoints:
   GET  /config              -> {"ok": true, "packet_root": "...", "default_root": "...", "config_path": "..."}
   PUT  /config              -> set packet_root, persist config.json, update live root
   POST /packets             -> write a packet (JSON+base64 or multipart), return record
+                               (optional ``name`` field = still-name override,
+                               always re-slugified server-side)
   POST /packets/{id}/place-photoshop
                             -> place the packet's still into Photoshop (macOS)
   GET  /packets             -> list packet summaries
@@ -25,6 +27,12 @@ on tainted ``visible_tab`` / ``burst_visible_tab`` captures so the full-tab
 PNG can be cropped to the video element's on-screen rectangle before it is
 saved (see ``helper.crop``). The field is ephemeral and is never persisted
 into ``record.yaml`` or burst metadata.
+
+Both also accept an optional ``name`` field: a type-in override for the still
+file name. It is trimmed by the client, slugified server-side, and used as
+``<slug>.png`` under ``<root>/<site>/<id>/`` (see ``helper.packets``). An
+empty or omitted ``name`` falls back to the slugified video title, and an
+unusable title falls back to ``<site>-<id[:8]>``.
 """
 
 from __future__ import annotations
@@ -63,10 +71,9 @@ from .crop import apply_crop_rect
 from .ffmpeg_burst import FFmpegBurstError, burst_frames_from_url, ffmpeg_available
 from .packets import (
     export_csv,
-    image_path as packet_image_path,
     list_packets,
     new_record,
-    packet_dir,
+    packet_image_path,
     read_record,
     write_packet,
 )
@@ -120,6 +127,7 @@ def _record_from_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], bytes
             tags=payload.get("tags") or [],
             notes=str(payload.get("notes") or ""),
             capture_method=str(payload.get("capture_method") or "canvas"),
+            name=str(payload.get("name") or "") or None,
         )
     except KeyError as exc:
         raise ValueError(f"missing field: {exc.args[0]}") from exc
@@ -168,6 +176,7 @@ def _record_from_multipart(content_type: str, body: bytes) -> tuple[dict[str, An
             tags=json.loads(fields.get("tags") or "[]"),
             notes=str(fields.get("notes") or ""),
             capture_method=str(fields.get("capture_method") or "canvas"),
+            name=str(fields.get("name") or "") or None,
         )
     except KeyError as exc:
         raise ValueError(f"missing field: {exc.args[0]}") from exc
@@ -215,6 +224,7 @@ def _burst_metadata_from_fields(fields: dict[str, Any]) -> dict[str, Any]:
         "timestamp_sec": _optional_float(fields.get("timestamp_sec")),
         "capture_method": str(fields.get("capture_method") or "burst_canvas"),
         "photoshop": _as_bool(fields.get("photoshop")),
+        "name": str(fields.get("name") or ""),
     }
 
 
@@ -285,6 +295,7 @@ def _picker_html(session_id: str, meta: dict[str, Any]) -> str:
             "site": meta.get("site") or "generic",
             "timestamp_sec": meta.get("timestamp_sec"),
             "capture_method": meta.get("capture_method") or "burst_canvas",
+            "name": meta.get("name") or "",
         }
     )
     meta_text = html.escape(
@@ -543,7 +554,7 @@ class ClipStashHandler(BaseHTTPRequestHandler):
         response: dict[str, Any] = {"ok": True, "packet": written}
         if self._photoshop_requested(photoshop):
             response["photoshop"] = place_in_photoshop(
-                packet_image_path(packet_dir(self.root, str(written["id"])))
+                packet_image_path(self.root, written)
             )
         self._send_json(response, 201)
 
@@ -604,6 +615,7 @@ class ClipStashHandler(BaseHTTPRequestHandler):
             "timestamp_sec": _optional_float(payload.get("timestamp_sec")),
             "capture_method": "burst_ffmpeg",
             "photoshop": _as_bool(payload.get("photoshop")),
+            "name": str(payload.get("name") or ""),
         }
         meta = create_burst(frames, metadata)
         session_id = str(meta["session_id"])
@@ -651,14 +663,13 @@ class ClipStashHandler(BaseHTTPRequestHandler):
         response: dict[str, Any] = {"ok": True, "packet": record}
         if photoshop:
             response["photoshop"] = place_in_photoshop(
-                packet_image_path(packet_dir(self.root, str(record["id"])))
+                packet_image_path(self.root, record)
             )
         self._send_json(response, 200)
 
     def _place_packet_in_photoshop(self, packet_id: str) -> None:
         record = read_record(packet_id, root=self.root)
-        directory = packet_dir(self.root, packet_id)
-        image = directory / str(record.get("image") or "still.png")
+        image = packet_image_path(self.root, record)
         if not image.exists():
             raise FileNotFoundError(f"packet {packet_id!r} has no still image")
         result = place_in_photoshop(image)

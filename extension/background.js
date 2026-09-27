@@ -31,9 +31,9 @@ async function handleMessage(message) {
     case "HEALTH":
       return checkHealth();
     case "SAVE_PACKET":
-      return captureAndSave(Boolean(message.placePhotoshop));
+      return captureAndSave(Boolean(message.placePhotoshop), cleanName(message.name));
     case "BURST_PICK":
-      return captureBurstAndOpenPicker(Boolean(message.placePhotoshop));
+      return captureBurstAndOpenPicker(Boolean(message.placePhotoshop), cleanName(message.name));
     case "APPEND_HISTORY":
       return appendHistory(message.packet);
     case "GET_HISTORY":
@@ -58,7 +58,11 @@ async function checkHealth() {
   }
 }
 
-async function captureAndSave(placePhotoshop) {
+function cleanName(name) {
+  return typeof name === "string" && name.trim() ? name.trim() : undefined;
+}
+
+async function captureAndSave(placePhotoshop, name) {
   const tab = await getActiveTab();
   if (!tab || !/^https?:/.test(tab.url || "")) {
     return { ok: false, error: "active tab is not a http(s) page" };
@@ -87,7 +91,7 @@ async function captureAndSave(placePhotoshop) {
   // (video CSS box × devicePixelRatio) is forwarded as `crop_rect` so the
   // helper crops the full-tab PNG to the video rectangle before saving.
   if (captured.tainted) {
-    return captureVisibleTabAndSave(tab, captured, placePhotoshop);
+    return captureVisibleTabAndSave(tab, captured, placePhotoshop, name);
   }
 
   if (!captured.ok) {
@@ -105,10 +109,13 @@ async function captureAndSave(placePhotoshop) {
     image_base64: imageBase64,
     photoshop: placePhotoshop,
   };
+  if (name) {
+    payload.name = name;
+  }
   return savePacket(payload);
 }
 
-async function captureVisibleTabAndSave(tab, meta, placePhotoshop) {
+async function captureVisibleTabAndSave(tab, meta, placePhotoshop, name) {
   let imageDataUrl;
   try {
     imageDataUrl = await captureVisibleTabPng(tab.windowId);
@@ -129,10 +136,13 @@ async function captureVisibleTabAndSave(tab, meta, placePhotoshop) {
   if (meta.cropRect) {
     payload.crop_rect = meta.cropRect;
   }
+  if (name) {
+    payload.name = name;
+  }
   return savePacket(payload);
 }
 
-async function captureBurstAndOpenPicker(placePhotoshop) {
+async function captureBurstAndOpenPicker(placePhotoshop, name) {
   const tab = await getActiveTab();
   if (!tab || !/^https?:/.test(tab.url || "")) {
     return { ok: false, error: "active tab is not a http(s) page" };
@@ -171,7 +181,7 @@ async function captureBurstAndOpenPicker(placePhotoshop) {
       site: captured.site,
       timestampSec: captured.timestampSec,
     };
-    const native = await tryNativeBurst(captured, placePhotoshop);
+    const native = await tryNativeBurst(captured, placePhotoshop, name);
     if (native) {
       return {
         ok: true,
@@ -215,6 +225,9 @@ async function captureBurstAndOpenPicker(placePhotoshop) {
     frames,
     photoshop: placePhotoshop,
   };
+  if (name) {
+    payload.name = name;
+  }
   if (captured.cropRect) {
     payload.crop_rect = captured.cropRect;
   }
@@ -247,25 +260,29 @@ async function captureBurstAndOpenPicker(placePhotoshop) {
 // canvas when the content script reported a media URL. Returns the picker
 // result on success, or null when the path is unavailable so the caller can
 // fall back to the single visible-tab shot. Never throws.
-async function tryNativeBurst(captured, placePhotoshop) {
+async function tryNativeBurst(captured, placePhotoshop, name) {
   const mediaUrl = String(captured.mediaUrl || "").trim();
   if (!/^https?:\/\//i.test(mediaUrl)) {
     return null;
+  }
+  const body = {
+    media_url: mediaUrl,
+    timestamp_sec: captured.timestampSec,
+    title: captured.title,
+    source_url: captured.sourceUrl,
+    page_url: captured.pageUrl,
+    site: captured.site,
+    photoshop: placePhotoshop,
+  };
+  if (name) {
+    body.name = name;
   }
   let response;
   try {
     response = await fetch(`${HELPER_BASE}/bursts/ffmpeg`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        media_url: mediaUrl,
-        timestamp_sec: captured.timestampSec,
-        title: captured.title,
-        source_url: captured.sourceUrl,
-        page_url: captured.pageUrl,
-        site: captured.site,
-        photoshop: placePhotoshop,
-      }),
+      body: JSON.stringify(body),
     });
   } catch (_error) {
     return null;

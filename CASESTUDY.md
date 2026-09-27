@@ -56,9 +56,9 @@ Create banner is the same either way (−). What the tool removes on the capture
 Clipboard history in the extension is a convenience. The **packet** is the source of truth:
 
 ```text
-~/Clipstash/packets/<id>/
-  still.png
-  record.yaml   # title, URLs, site, capture_method, timestamp, …
+~/Clipstash/packets/<site>/<id>/
+  <slug>.png    # slugified video title (or popup type-in override)
+  record.yaml   # title, URLs, site, image/name, capture_method, timestamp, …
 ```
 
 Site adapters (YouTube, X, Instagram, TikTok, plus a generic fallback) own title and URL for each site. Capture code owns the still.
@@ -111,8 +111,8 @@ Install aims at “boring for strangers”: Homebrew formula and/or a local PyIn
 
 **On the product backlog (idea pile → cards):**
 
-- Web-safe still / layer names (adapter defaults for the four sites + optional type-in we always slugify).
-- Packets organized by **site folder** (e.g. YouTube/…) with stills named from the **video title** (web-safe), so a folder listing is readable and the YAML still holds the page URL for remakes.
+- ~~Web-safe still / layer names (adapter defaults for the four sites + optional type-in we always slugify).~~ Landed: `helper/slug.py` + popup "Still name" field; stills are `<slug>.png`.
+- ~~Packets organized by **site folder** (e.g. YouTube/…) with stills named from the **video title** (web-safe), so a folder listing is readable and the YAML still holds the page URL for remakes.~~ Landed: packets live at `~/Clipstash/packets/<site>/<id>/`.
 - Export polish around that YAML → CSV / spreadsheet story.
 - Creator video-grid overlay: **green check** on thumbnails already in the packet log (huge when you are making ~100 per category — we had a version of this in the original private tool).
 
@@ -140,7 +140,7 @@ The product lesson: **end a client job by naming the transferable object** (here
 - Homebrew / single-binary install story
 - MIT license, public GitHub, no client data in tree
 
-v1 is the capture + packet core. Matching the full “banner factory” story (site folders, title-slug names, grid checks, richer export) is intentional follow-on work — update the code to match this case study as those cards ship.
+v1 is the capture + packet core. Site folders and title-slug still names have shipped; remaining “banner factory” follow-on work (grid checks, richer export) stays on the backlog — update the code to match this case study as those cards ship.
 
 ---
 
