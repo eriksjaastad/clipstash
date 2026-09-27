@@ -49,7 +49,7 @@ Stranger install (macOS): Homebrew formula (`packaging/homebrew/README.md`) or s
 
 ## Save root
 
-Packets default to `~/Clipstash/packets`. Change the root from the extension **Options** page (writes `~/Clipstash/config.json`) or with `--root` / `CLIPSTASH_ROOT`; the resolution order lives in `helper/config.py` and `clipstashd --help`.
+Packets default to `~/Clipstash/packets/<site>/<id>/<slug>.png` + `record.yaml`, where `<site>` is the adapter id (`youtube`, `tiktok`, `instagram`, `x`, `generic`) and `<slug>` comes from the video title (or the popup's optional **Still name** field). Change the root from the extension **Options** page (writes `~/Clipstash/config.json`) or with `--root` / `CLIPSTASH_ROOT`; the resolution order lives in `helper/config.py` and `clipstashd --help`.
 
 ## Documentation
 

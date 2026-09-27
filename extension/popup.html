@@ -21,6 +21,16 @@
     <section class="capture">
       <button id="save-packet" class="primary">Save packet</button>
       <button id="burst-pick" class="primary secondary">Burst &amp; pick</button>
+      <label class="name-field">
+        <span>Still name (optional)</span>
+        <input
+          type="text"
+          id="still-name"
+          placeholder="empty = video title slug"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </label>
       <label class="photoshop-option">
         <input type="checkbox" id="place-photoshop" />
         <span>Also place in Photoshop <em>(macOS, off by default)</em></span>
@@ -36,7 +46,7 @@
 
     <footer>
       <a href="#" id="open-options">Options</a>
-      <span class="note">helper writes to ~/Clipstash/packets</span>
+      <span class="note">helper writes to ~/Clipstash/packets/&lt;site&gt;/&lt;id&gt;/</span>
     </footer>
 
     <script src="popup.js"></script>

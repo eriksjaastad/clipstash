@@ -27,8 +27,9 @@ page_url: "https://www.youtube.com/watch?v=…"   # may equal source_url
 timestamp_sec: 142.5          # optional, when known
 site: youtube                 # adapter id
 capture_method: canvas        # canvas | visible_tab (taint fallback)
-image: still.png              # relative path
-thumb: still.thumb.jpg        # optional small preview
+image: how-i-edit-thumbnails.png  # slugified title (or popup type-in)
+name: how-i-edit-thumbnails   # slug, repeated for convenience
+thumb: how-i-edit-thumbnails.thumb.jpg  # optional small preview
 tags: []
 notes: ""
 clipboard:
@@ -40,10 +41,13 @@ clipboard:
 **On disk (v1 default):**
 
 ```
-~/Clipstash/packets/<id>/
-  still.png
-  record.yaml
+~/Clipstash/packets/<site>/<id>/
+  <slug>.png       # slugified video title (or popup type-in), e.g. how-i-edit-thumbnails.png
+  record.yaml      # image + name carry the slug; page_url/source_url kept for remakes
 ```
+
+`<site>` matches adapter ids: `youtube` | `tiktok` | `instagram` | `x` | `generic`.
+Older flat packets (`~/Clipstash/packets/<id>/still.png`) still read/list for remakes.
 
 Configurable root via extension options / helper config.
 

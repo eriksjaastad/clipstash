@@ -38,6 +38,11 @@ function placePhotoshopChecked() {
   return Boolean($("place-photoshop").checked);
 }
 
+function stillName() {
+  const value = ($("still-name").value || "").trim();
+  return value || undefined;
+}
+
 async function refreshHealth() {
   const dot = $("helper-dot");
   const text = $("helper-text");
@@ -65,7 +70,11 @@ async function onSavePacket() {
   status.className = "status";
   status.textContent = "saving…";
 
-  const response = await send({ type: "SAVE_PACKET", placePhotoshop: placePhotoshopChecked() });
+  const response = await send({
+    type: "SAVE_PACKET",
+    placePhotoshop: placePhotoshopChecked(),
+    name: stillName(),
+  });
   button.disabled = false;
 
   if (response && response.ok) {
@@ -88,7 +97,11 @@ async function onBurstPick() {
   status.className = "status";
   status.textContent = "capturing burst…";
 
-  const response = await send({ type: "BURST_PICK", placePhotoshop: placePhotoshopChecked() });
+  const response = await send({
+    type: "BURST_PICK",
+    placePhotoshop: placePhotoshopChecked(),
+    name: stillName(),
+  });
   button.disabled = false;
 
   if (response && response.ok) {

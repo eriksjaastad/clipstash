@@ -25,8 +25,12 @@ from helper.crop import apply_crop_rect
 from helper.packets import (
     default_root,
     export_csv,
+    find_packet_dir,
     list_packets,
     new_record,
+    normalize_site,
+    packet_dir,
+    packet_image_path,
     read_record,
     ulid,
     write_packet,
@@ -87,13 +91,20 @@ def test_new_record_has_clipboard_pack():
     record = new_record("How I edit", "https://example.com/v=1")
     assert record["id"]
     assert record["created_at"].endswith("+00:00")
-    assert record["image"] == "still.png"
+    assert record["image"] == "how-i-edit.png"
+    assert record["name"] == "how-i-edit"
     assert record["capture_method"] == "canvas"
     assert record["clipboard"] == {
         "title": "How I edit",
         "url": "https://example.com/v=1",
         "text": "How I edit\nhttps://example.com/v=1",
     }
+
+
+def test_new_record_name_override_is_slugified():
+    record = new_record("How I edit", "https://example.com/v=1", name="My Still! FINAL")
+    assert record["image"] == "my-still-final.png"
+    assert record["name"] == "my-still-final"
 
 
 def test_new_record_capture_method():
@@ -113,30 +124,111 @@ def test_new_record_requires_fields():
 def test_write_and_read_packet(tmp_path):
     record = new_record("Demo", "https://example.com/v=1", site="youtube")
     written = write_packet(record, PNG_1PX, root=tmp_path)
-    assert written["image"] == "still.png"
+    assert written["image"] == "demo.png"
+    assert written["name"] == "demo"
 
-    directory = tmp_path / record["id"]
-    assert (directory / "still.png").read_bytes() == PNG_1PX
+    directory = tmp_path / "youtube" / record["id"]
+    assert (directory / "demo.png").read_bytes() == PNG_1PX
     assert (directory / "record.yaml").exists()
 
     reread = read_record(record["id"], root=tmp_path)
     assert reread["title"] == "Demo"
     assert reread["source_url"] == "https://example.com/v=1"
+    assert reread["image"] == "demo.png"
+
+
+def test_write_packet_layout_uses_site_folder(tmp_path):
+    youtube = new_record("YouTube clip", "https://example.com/1", site="youtube")
+    generic = new_record("Generic clip", "https://example.com/2", site="generic")
+    write_packet(youtube, PNG_1PX, root=tmp_path)
+    write_packet(generic, PNG_1PX, root=tmp_path)
+
+    assert (tmp_path / "youtube" / youtube["id"] / "youtube-clip.png").exists()
+    assert (tmp_path / "generic" / generic["id"] / "generic-clip.png").exists()
+    assert packet_dir(tmp_path, youtube["id"], site="youtube") == tmp_path / "youtube" / youtube["id"]
+
+
+def test_write_packet_unknown_site_falls_back_to_generic(tmp_path):
+    record = new_record("Weird site", "https://example.com/1", site="../../etc")
+    written = write_packet(record, PNG_1PX, root=tmp_path)
+    assert written["site"] == "generic"
+    assert (tmp_path / "generic" / record["id"] / "weird-site.png").exists()
+
+
+def test_write_packet_name_override_is_always_reslugified(tmp_path):
+    record = new_record("Title", "https://example.com/1", site="youtube", name="already-clean")
+    written = write_packet(record, PNG_1PX, root=tmp_path, name="  My Raw! Name  ")
+    assert written["name"] == "my-raw-name"
+    assert written["image"] == "my-raw-name.png"
+    assert (tmp_path / "youtube" / record["id"] / "my-raw-name.png").exists()
+
+
+def test_read_record_legacy_flat_layout(tmp_path):
+    directory = tmp_path / "01JLEGACY0000000000000000"
+    directory.mkdir(parents=True)
+    (directory / "still.png").write_bytes(PNG_1PX)
+    (directory / "record.yaml").write_text(
+        "id: 01JLEGACY0000000000000000\n"
+        "title: Legacy flat\n"
+        "source_url: https://example.com/legacy\n"
+        "image: still.png\n",
+        encoding="utf-8",
+    )
+
+    record = read_record("01JLEGACY0000000000000000", root=tmp_path)
+    assert record["title"] == "Legacy flat"
+    assert record["image"] == "still.png"
+    assert find_packet_dir("01JLEGACY0000000000000000", root=tmp_path) == directory
+    assert packet_image_path(tmp_path, record) == directory / "still.png"
+
+
+def test_read_record_missing_packet_fails_clearly(tmp_path):
+    with pytest.raises(FileNotFoundError, match="no packet with id"):
+        read_record("01JMISSING000000000000000", root=tmp_path)
+
+
+def test_normalize_site_allows_only_adapter_ids():
+    assert normalize_site("YouTube") == "youtube"
+    assert normalize_site("x") == "x"
+    assert normalize_site("../../evil") == "generic"
+    assert normalize_site("") == "generic"
 
 
 def test_list_and_export_csv(tmp_path):
-    first = new_record("First", "https://example.com/1", packet_id="01JFIRST0000000000000000")
-    second = new_record("Second", "https://example.com/2", packet_id="01JSECOND000000000000000")
+    first = new_record("First", "https://example.com/1", packet_id="01JFIRST0000000000000000", site="youtube")
+    second = new_record("Second", "https://example.com/2", packet_id="01JSECOND000000000000000", site="tiktok")
     write_packet(first, PNG_1PX, root=tmp_path)
     write_packet(second, PNG_1PX, root=tmp_path)
 
     summaries = list_packets(root=tmp_path)
     assert [s["title"] for s in summaries] == ["Second", "First"]
     assert summaries[0]["source_url"] == "https://example.com/2"
+    assert {s["site"] for s in summaries} == {"youtube", "tiktok"}
 
     csv_text = export_csv(root=tmp_path)
     assert "id,created_at,title,source_url" in csv_text
+    assert "name" in csv_text.splitlines()[0]
     assert "First" in csv_text and "Second" in csv_text
+
+
+def test_list_packets_sees_site_and_legacy_flat(tmp_path):
+    record = new_record("Site packet", "https://example.com/site", site="youtube")
+    write_packet(record, PNG_1PX, root=tmp_path)
+
+    legacy_dir = tmp_path / "01JLEGACY0000000000000000"
+    legacy_dir.mkdir(parents=True)
+    (legacy_dir / "still.png").write_bytes(PNG_1PX)
+    (legacy_dir / "record.yaml").write_text(
+        "id: 01JLEGACY0000000000000000\n"
+        "title: Legacy packet\n"
+        "source_url: https://example.com/legacy\n"
+        "image: still.png\n",
+        encoding="utf-8",
+    )
+
+    summaries = list_packets(root=tmp_path)
+    titles = {s["title"] for s in summaries}
+    assert titles == {"Site packet", "Legacy packet"}
 
 
 # --------------------------------------------------------------------------
@@ -243,7 +335,8 @@ def test_post_packet_json_and_list(server):
     record = payload["packet"]
     assert record["title"] == "Test packet"
     assert record["site"] == "youtube"
-    assert record["image"] == "still.png"
+    assert record["image"] == "test-packet.png"
+    assert record["name"] == "test-packet"
     assert record["capture_method"] == "canvas"
 
     status, _, body = request(server_url(server, "/packets"))
@@ -251,6 +344,32 @@ def test_post_packet_json_and_list(server):
     assert status == 200
     assert len(payload["packets"]) == 1
     assert payload["packets"][0]["id"] == record["id"]
+
+
+def test_post_packet_name_override_writes_slugged_still(server, tmp_path):
+    payload = make_payload(name="  My Still! FINAL  ")
+    status, _, body = request(
+        server_url(server, "/packets"),
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+    )
+    assert status == 201
+    record = json.loads(body)["packet"]
+    assert record["image"] == "my-still-final.png"
+    assert record["name"] == "my-still-final"
+    assert (tmp_path / "youtube" / record["id"] / "my-still-final.png").exists()
+
+
+def test_post_packet_empty_name_uses_title_slug(server, tmp_path):
+    payload = make_payload(name="   ")
+    status, _, body = request(
+        server_url(server, "/packets"),
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+    )
+    assert status == 201
+    record = json.loads(body)["packet"]
+    assert record["image"] == "test-packet.png"
 
 
 def test_post_packet_capture_method_visible_tab(server):
@@ -283,7 +402,7 @@ def test_post_packet_visible_tab_crop_rect_crops_still(server, tmp_path):
     )
     assert status == 201
     record = json.loads(body)["packet"]
-    still = (tmp_path / record["id"] / "still.png").read_bytes()
+    still = (tmp_path / record["site"] / record["id"] / record["image"]).read_bytes()
     assert png_size_and_pixel(still, (0, 0)) == ((40, 30), GREEN)
     # crop_rect is an ephemeral request field, never persisted.
     assert "crop_rect" not in read_record(record["id"], root=tmp_path)
@@ -302,7 +421,7 @@ def test_post_packet_visible_tab_without_crop_rect_keeps_full_still(server, tmp_
     )
     assert status == 201
     record = json.loads(body)["packet"]
-    still = (tmp_path / record["id"] / "still.png").read_bytes()
+    still = (tmp_path / record["site"] / record["id"] / record["image"]).read_bytes()
     assert png_size_and_pixel(still, (0, 0)) == ((200, 100), RED)
 
 
@@ -346,7 +465,10 @@ def test_post_packet_multipart(server, tmp_path):
         payload = json.loads(resp.read())
     assert payload["packet"]["title"] == "Multipart packet"
     assert payload["packet"]["source_url"] == "https://example.com/multi"
-    still = (tmp_path / payload["packet"]["id"] / "still.png").read_bytes()
+    assert payload["packet"]["image"] == "multipart-packet.png"
+    still = (
+        tmp_path / payload["packet"]["site"] / payload["packet"]["id"] / payload["packet"]["image"]
+    ).read_bytes()
     assert png_size_and_pixel(still, (0, 0)) == ((40, 30), GREEN)
 
 
@@ -420,8 +542,8 @@ def test_put_config_persists_updates_live_root_and_writes(server, tmp_path):
     )
     assert status == 201
     record = json.loads(body)["packet"]
-    assert (new_root / record["id"] / "still.png").exists()
-    assert (new_root / record["id"] / "record.yaml").exists()
+    assert (new_root / record["site"] / record["id"] / record["image"]).exists()
+    assert (new_root / record["site"] / record["id"] / "record.yaml").exists()
 
     # The root was persisted on disk.
     config_path = server.RequestHandlerClass.config_path
@@ -532,18 +654,42 @@ def test_create_burst_choose_frame_and_packet(server, tmp_path):
     packet = chosen["packet"]
     assert packet["title"] == "Chosen burst frame"
     assert packet["capture_method"] == "burst_canvas"
-    assert packet["image"] == "still.png"
+    assert packet["image"] == "chosen-burst-frame.png"
 
-    # Packet is on disk under the server's packet root.
+    # Packet is on disk under the server's packet root (site folder).
     record = read_record(packet["id"], root=tmp_path)
     assert record["title"] == "Chosen burst frame"
-    assert (tmp_path / packet["id"] / "still.png").read_bytes() == PNG_1PX
+    assert (
+        tmp_path / "youtube" / packet["id"] / "chosen-burst-frame.png"
+    ).read_bytes() == PNG_1PX
 
     # Session is gone after choose.
     status, _, _ = request(server_url(server, f"/picker/{session_id}"))
     assert status == 404
     status, _, _ = request(server_url(server, f"/picker/{session_id}/frame/1"))
     assert status == 404
+
+
+def test_burst_name_override_flows_to_chosen_packet(server, tmp_path):
+    status, _, body = request(
+        server_url(server, "/bursts"),
+        data=json.dumps(make_burst_payload(frame_count=1, name="Burst Still!")).encode(
+            "utf-8"
+        ),
+        method="POST",
+    )
+    assert status == 201
+    session_id = json.loads(body)["session_id"]
+
+    status, _, body = request(
+        server_url(server, f"/picker/{session_id}/choose"),
+        data=json.dumps({"frame_index": 0}).encode("utf-8"),
+        method="POST",
+    )
+    assert status == 200
+    packet = json.loads(body)["packet"]
+    assert packet["image"] == "burst-still.png"
+    assert (tmp_path / "youtube" / packet["id"] / "burst-still.png").exists()
 
 
 def test_burst_visible_tab_capture_method_round_trip(server, tmp_path):
@@ -611,7 +757,9 @@ def test_burst_visible_tab_crop_rect_crops_frame_and_chosen_packet(server, tmp_p
     )
     assert status == 200
     packet = json.loads(body)["packet"]
-    still = (tmp_path / packet["id"] / "still.png").read_bytes()
+    still = (
+        tmp_path / packet["site"] / packet["id"] / packet["image"]
+    ).read_bytes()
     assert png_size_and_pixel(still, (0, 0)) == ((40, 30), GREEN)
     assert read_record(packet["id"], root=tmp_path)["capture_method"] == "burst_visible_tab"
 

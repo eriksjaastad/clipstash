@@ -105,6 +105,7 @@ def create_burst(
         "timestamp_sec": _optional_float(metadata.get("timestamp_sec")),
         "capture_method": str(metadata.get("capture_method") or "burst_canvas"),
         "photoshop": _as_bool(metadata.get("photoshop")),
+        "name": str(metadata.get("name") or ""),
     }
     (directory / META_FILENAME).write_text(
         json.dumps(meta, indent=2), encoding="utf-8"
@@ -149,6 +150,7 @@ def choose_frame(
 
     title = str(metadata.get("title") or meta.get("title") or "")
     source_url = str(metadata.get("source_url") or meta.get("source_url") or "")
+    name = str(metadata.get("name") or meta.get("name") or "") or None
     record = new_record(
         title=title,
         source_url=source_url,
@@ -162,8 +164,9 @@ def choose_frame(
             or meta.get("capture_method")
             or "burst_canvas"
         ),
+        name=name,
     )
-    written = write_packet(record, frame_path.read_bytes(), root=root)
+    written = write_packet(record, frame_path.read_bytes(), root=root, name=name)
     shutil.rmtree(directory, ignore_errors=True)
     return written
 

@@ -109,6 +109,29 @@ button.primary.secondary {
   font-weight: 600;
 }
 
+.name-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.name-field input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.name-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .photoshop-option {
   display: flex;
   align-items: center;

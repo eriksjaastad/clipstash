@@ -6,7 +6,8 @@ page_url: https://www.youtube.com/watch?v=dQw4w9WgXcQ
 timestamp_sec: 142.5
 site: youtube
 capture_method: canvas
-image: still.png
+image: synthetic-demo-packet-youtube.png
+name: synthetic-demo-packet-youtube
 tags:
 - demo
 - synthetic

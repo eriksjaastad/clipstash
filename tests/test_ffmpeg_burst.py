@@ -224,7 +224,9 @@ def test_ffmpeg_burst_endpoint_creates_session_picker_and_choose(server, tmp_pat
     packet = chosen["packet"]
     assert packet["capture_method"] == "burst_ffmpeg"
     assert read_record(packet["id"], root=tmp_path)["capture_method"] == "burst_ffmpeg"
-    assert (tmp_path / packet["id"] / "still.png").read_bytes().startswith(PNG_MAGIC)
+    assert (
+        tmp_path / "youtube" / packet["id"] / "native-burst.png"
+    ).read_bytes().startswith(PNG_MAGIC)
 
 
 def test_ffmpeg_burst_endpoint_requires_media_url(server) -> None:
