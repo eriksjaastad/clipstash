@@ -1,0 +1,23 @@
+/* clipstash green-check overlay styles (#7691).
+   Namespaced classes only; injected on YouTube / TikTok / Instagram grids. */
+
+.clipstash-captured-host {
+  position: relative !important;
+}
+
+.clipstash-captured-check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #16a34a;
+  color: #ffffff;
+  font: bold 15px/24px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  text-align: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  user-select: none;
+  z-index: 2147483000;
+}

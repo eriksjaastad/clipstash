@@ -2,22 +2,27 @@
 //
 // Message hub for the popup/picker and owner of the clipboard history in
 // chrome.storage.local. Handles HEALTH, SAVE_PACKET (single frame capture),
-// BURST_PICK (burst capture + helper picker), APPEND_HISTORY and GET_HISTORY.
-// Talks to the local helper at http://127.0.0.1:8787. Canvas-taint falls back
-// to captureVisibleTab; the content scripts report a `cropRect` (video element
-// CSS box × devicePixelRatio) with the taint signal, which we forward as
-// `crop_rect` so the helper can crop the full-tab PNG to the video rectangle.
-// For tainted *bursts* we first try the helper's native ffmpeg burst from the
-// video's media URL (`burst_ffmpeg`); when the media URL is missing or the
-// helper path fails, we fall back to a single cropped visible-tab shot
-// (`burst_visible_tab`). Burst-chosen history entries are drained from the
-// helper's pending queue so picker tabs don't need direct storage access.
+// BURST_PICK (burst capture + helper picker), APPEND_HISTORY, GET_HISTORY and
+// GET_CAPTURED_URLS (the canonicalized packet URL set used by the #7691
+// green-check overlay). Talks to the local helper at http://127.0.0.1:8787.
+// Canvas-taint falls back to captureVisibleTab; the content scripts report a
+// `cropRect` (video element CSS box × devicePixelRatio) with the taint signal,
+// which we forward as `crop_rect` so the helper can crop the full-tab PNG to
+// the video rectangle. For tainted *bursts* we first try the helper's native
+// ffmpeg burst from the video's media URL (`burst_ffmpeg`); when the media URL
+// is missing or the helper path fails, we fall back to a single cropped
+// visible-tab shot (`burst_visible_tab`). Burst-chosen history entries are
+// drained from the helper's pending queue so picker tabs don't need direct
+// storage access.
+
+importScripts("lib/urls.js");
 
 const HELPER_BASE = "http://127.0.0.1:8787";
 const HISTORY_KEY = "clipstashHistory";
 const HISTORY_MAX = 20;
 const PENDING_POLL_INTERVAL_MS = 1000;
 const PENDING_POLL_TIMEOUT_MS = 3 * 60 * 1000;
+const CAPTURED_URLS_TTL_MS = 45 * 1000;
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   handleMessage(message)
@@ -39,6 +44,8 @@ async function handleMessage(message) {
     case "GET_HISTORY":
       await drainPendingHistory();
       return { ok: true, history: await getHistory() };
+    case "GET_CAPTURED_URLS":
+      return getCapturedUrls();
     default:
       return { ok: false, error: `unknown message type: ${message && message.type}` };
   }
@@ -60,6 +67,68 @@ async function checkHealth() {
 
 function cleanName(name) {
   return typeof name === "string" && name.trim() ? name.trim() : undefined;
+}
+
+// -- captured URL index (green-check overlay) --------------------------------
+
+let capturedUrlsCache = { urls: [], fetchedAt: 0 };
+let capturedUrlsInFlight = null;
+let capturedUrlsGeneration = 0;
+
+async function getCapturedUrls() {
+  const now = Date.now();
+  if (capturedUrlsCache.fetchedAt && now - capturedUrlsCache.fetchedAt < CAPTURED_URLS_TTL_MS) {
+    return { ok: true, urls: capturedUrlsCache.urls };
+  }
+  if (capturedUrlsInFlight) {
+    return capturedUrlsInFlight;
+  }
+  capturedUrlsInFlight = fetchCapturedUrls().finally(() => {
+    capturedUrlsInFlight = null;
+  });
+  return capturedUrlsInFlight;
+}
+
+async function fetchCapturedUrls() {
+  const generation = capturedUrlsGeneration;
+  let response;
+  try {
+    response = await fetch(`${HELPER_BASE}/packets`);
+  } catch (_error) {
+    // Helper unreachable: the overlay shows nothing and never surfaces errors.
+    return { ok: false, urls: [] };
+  }
+  const body = await response.json().catch(() => ({}));
+  const packets = Array.isArray(body.packets) ? body.packets : [];
+  const canonicalize =
+    (globalThis.ClipStashUrls && globalThis.ClipStashUrls.canonicalizeVideoUrl) ||
+    ((url) => url);
+
+  const seen = new Set();
+  for (const packet of packets) {
+    for (const field of ["source_url", "page_url"]) {
+      const value = packet && packet[field];
+      if (typeof value !== "string") {
+        continue;
+      }
+      const canonical = canonicalize(value);
+      if (canonical) {
+        seen.add(canonical);
+      }
+    }
+  }
+  const urls = Array.from(seen);
+  // A save may have invalidated the cache while this fetch was in flight;
+  // don't overwrite the fresher (empty, refetching) state with stale data.
+  if (generation === capturedUrlsGeneration) {
+    capturedUrlsCache = { urls, fetchedAt: Date.now() };
+  }
+  return { ok: true, urls };
+}
+
+function invalidateCapturedUrls() {
+  capturedUrlsGeneration += 1;
+  capturedUrlsCache = { urls: [], fetchedAt: 0 };
 }
 
 async function captureAndSave(placePhotoshop, name) {
@@ -287,25 +356,25 @@ async function tryNativeBurst(captured, placePhotoshop, name) {
   } catch (_error) {
     return null;
   }
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok || !body.ok) {
+  const responseBody = await response.json().catch(() => ({}));
+  if (!response.ok || !responseBody.ok) {
     console.warn(
       "clipstash: native ffmpeg burst unavailable, falling back to visible_tab:",
-      body.error || `helper returned ${response.status}`
+      responseBody.error || `helper returned ${response.status}`
     );
     return null;
   }
   try {
-    await createTab(body.picker_url);
+    await createTab(responseBody.picker_url);
   } catch (_error) {
     return null;
   }
   startPendingHistoryPolling();
   return {
     ok: true,
-    session_id: body.session_id,
-    picker_url: body.picker_url,
-    capture_method: body.capture_method || "burst_ffmpeg",
+    session_id: responseBody.session_id,
+    picker_url: responseBody.picker_url,
+    capture_method: responseBody.capture_method || "burst_ffmpeg",
   };
 }
 
@@ -359,6 +428,7 @@ async function savePacket(payload) {
 
   const record = body.packet;
   await pushHistory(historyEntryFromPacket(record));
+  invalidateCapturedUrls();
   return { ok: true, packet: record, photoshop: body.photoshop || null };
 }
 
@@ -378,6 +448,7 @@ async function appendHistory(packet) {
     return { ok: false, error: "APPEND_HISTORY requires a packet with id/title/source_url" };
   }
   await pushHistory(historyEntryFromPacket(packet));
+  invalidateCapturedUrls();
   return { ok: true };
 }
 
@@ -403,6 +474,9 @@ async function drainPendingHistory() {
       await pushHistory(normalized);
       appended.push(normalized.id);
     }
+  }
+  if (appended.length > 0) {
+    invalidateCapturedUrls();
   }
   return { ok: true, appended };
 }

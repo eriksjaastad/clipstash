@@ -110,6 +110,7 @@ Precursor used `roster_server.py` + Shortcuts/`grab.sh` + ffmpeg for native-reso
 - Open picker (helper UI) or accept auto-best later.
 - On save: ask helper to write packet; push **title + URL** to system clipboard; append to **in-plugin history** (last N, e.g. 20).
 - History panel: re-copy title, URL, or combined text; open packet folder; reveal image.
+- Creator grids: on YouTube / TikTok / Instagram, show a **green check** on thumbs already in the packet log (#7691; canonical URL match against `GET /packets`; X out of scope).
 
 ### Clipboard history (explicit product requirement)
 
