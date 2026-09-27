@@ -180,6 +180,7 @@ async function extractFor(url, doc) {
     ["https://youtu.be/dQw4w9WgXcQ?si=abc", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
     ["https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
     ["https://www.youtube.com/shorts/abc123?feature=share", "https://www.youtube.com/watch?v=abc123"],
+    ["https://m.youtube.com/watch?v=dQw4w9WgXcQ&t=10", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
     ["https://www.instagram.com/reel/CxYz123/?utm_source=x", "https://www.instagram.com/reel/CxYz123/"],
     ["https://www.instagram.com/reels/CxYz123/", "https://www.instagram.com/reel/CxYz123/"],
     ["https://www.instagram.com/p/CxYz123/", "https://www.instagram.com/p/CxYz123/"],
@@ -199,6 +200,7 @@ async function extractFor(url, doc) {
   const greenSites = [
     "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
     "https://youtu.be/dQw4w9WgXcQ",
+    "https://m.youtube.com/@creator/videos",
     "https://www.tiktok.com/@someone/video/7300000000000000000",
     "https://www.instagram.com/reel/CxYz123/",
   ];
@@ -347,6 +349,48 @@ function makeOverlayDocument(anchors) {
   );
   check(notCapturedAnchor.getAttribute("data-clipstash-captured") === null, "overlay leaves non-captured anchors unmarked");
   check(notCapturedAnchor.children.length === 0, "overlay adds no badge to non-captured anchors");
+}
+
+{
+  // Relative grid hrefs (common on YouTube) must resolve against location.href
+  // before canonicalize, otherwise badges never match absolute packet URLs.
+  const capturedAnchor = makeFakeAnchor("/watch?v=dQw4w9WgXcQ");
+  const notCapturedAnchor = makeFakeAnchor("/watch?v=zzzzzzzzzzz");
+  const doc = makeOverlayDocument([capturedAnchor, notCapturedAnchor]);
+  const sentMessages = [];
+  class FakeMutationObserver {
+    constructor() {}
+    observe() {}
+    disconnect() {}
+  }
+  const sandbox = {
+    console,
+    Promise,
+    Set,
+    URL,
+    setTimeout,
+    setInterval: () => 0,
+    location: { href: "https://www.youtube.com/@creator/videos", hostname: "www.youtube.com" },
+    document: doc,
+    window: { addEventListener() {} },
+    chrome: {
+      runtime: {
+        sendMessage: async (message) => {
+          sentMessages.push(message);
+          return { ok: true, urls: ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"] };
+        },
+      },
+    },
+    MutationObserver: FakeMutationObserver,
+  };
+  loadUrls(sandbox);
+  runInNewContext(capturedOverlaySrc, sandbox, { filename: "captured-overlay.js" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  check(
+    capturedAnchor.getAttribute("data-clipstash-captured") === "1",
+    "overlay badges relative /watch?v= hrefs against absolute packet URLs"
+  );
+  check(notCapturedAnchor.getAttribute("data-clipstash-captured") === null, "overlay leaves unmatched relative hrefs unmarked");
 }
 
 {

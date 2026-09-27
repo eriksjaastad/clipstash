@@ -5,8 +5,9 @@
 // OUT OF SCOPE: the gate returns before any observer, badge, or message code
 // runs, so x.com / twitter.com pages never get a green-check path.
 //
-// Matching: grid hrefs and packet source_url/page_url are BOTH canonicalized
-// with ClipStashUrls.canonicalizeVideoUrl before set lookup, so remakes,
+// Matching: grid hrefs (resolved against location.href so relative /watch
+// paths work) and packet source_url/page_url are BOTH canonicalized with
+// ClipStashUrls.canonicalizeVideoUrl before set lookup, so remakes,
 // youtu.be / shorts / reel variants, and query noise hit the same key.
 //
 // Badge: a small green circle + white check appended to the candidate
@@ -30,12 +31,24 @@
   let scanTimer = null;
 
   const host = location.hostname.replace(/^www\./, "");
+  const isYouTube = host === "youtu.be" || host === "youtube.com" || host.endsWith(".youtube.com");
+
+  function absoluteHref(href) {
+    if (!href) {
+      return "";
+    }
+    try {
+      return new URL(href, location.href).href;
+    } catch (_error) {
+      return "";
+    }
+  }
 
   function isCandidateHref(href) {
     if (!href) {
       return false;
     }
-    if (host === "youtube.com" || host === "youtu.be") {
+    if (isYouTube) {
       return href.includes("/watch?v=") || href.includes("/shorts/");
     }
     if (host === "tiktok.com") {
@@ -73,7 +86,7 @@
       if (link.getAttribute(MARK) === "1") {
         continue;
       }
-      const key = urls.canonicalizeVideoUrl(link.getAttribute("href") || "");
+      const key = urls.canonicalizeVideoUrl(absoluteHref(link.getAttribute("href") || ""));
       if (key && captured.has(key)) {
         applyBadge(link);
       }

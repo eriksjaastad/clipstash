@@ -6,8 +6,9 @@
 // share one canonical key.
 //
 // Rules:
-// - YouTube: youtu.be/<id> and /watch?v=<id> → https://www.youtube.com/watch?v=<id>.
+// - YouTube: youtu.be/<id>, www/m.youtube.com/watch?v=<id> → https://www.youtube.com/watch?v=<id>.
 //   /shorts/<id> → the same watch URL when it appears on grids.
+//   Relative hrefs must be absolutized by the caller (overlay uses location.href as base).
 // - Instagram: /reel|/reels|/p|/tv/<code>/ → https://www.instagram.com/<reel|p|tv>/<code>/
 //   (/reels/ collapses to /reel/).
 // - TikTok: /@user/video/<id> → https://www.tiktok.com/@user/video/<id>
@@ -51,12 +52,12 @@ globalThis.ClipStashUrls = (() => {
 
     const host = bareHostname(parsed);
 
-    if (host === "youtu.be") {
-      const id = parsed.pathname.split("/").filter(Boolean)[0] || "";
-      return id ? `https://www.youtube.com/watch?v=${id}` : stripQueryHash(parsed);
-    }
-
-    if (host === "youtube.com") {
+    // www / m / music.youtube.com and youtu.be all collapse to the same watch key.
+    if (host === "youtu.be" || host === "youtube.com" || host.endsWith(".youtube.com")) {
+      if (host === "youtu.be") {
+        const id = parsed.pathname.split("/").filter(Boolean)[0] || "";
+        return id ? `https://www.youtube.com/watch?v=${id}` : stripQueryHash(parsed);
+      }
       const videoId = parsed.searchParams.get("v");
       if (parsed.pathname === "/watch" && videoId) {
         return `https://www.youtube.com/watch?v=${videoId}`;
@@ -101,8 +102,13 @@ globalThis.ClipStashUrls = (() => {
     if (!parsed) {
       return false;
     }
-    return ["youtube.com", "youtu.be", "tiktok.com", "instagram.com"].includes(
-      bareHostname(parsed)
+    const host = bareHostname(parsed);
+    return (
+      host === "youtu.be" ||
+      host === "youtube.com" ||
+      host.endsWith(".youtube.com") ||
+      host === "tiktok.com" ||
+      host === "instagram.com"
     );
   }
 
