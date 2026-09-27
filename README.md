@@ -8,7 +8,7 @@ Chrome-first tool that captures a still from a page video (YouTube, X/Twitter, I
 
 ## Status
 
-Early public extract. See [PLAN.md](./PLAN.md); known gaps in [ISSUES.md](./ISSUES.md).
+Early public extract. See [PLAN.md](./PLAN.md); known gaps in [ISSUES.md](./ISSUES.md). Story of the extract: [CASESTUDY.md](./CASESTUDY.md).
 
 ## Board
 
