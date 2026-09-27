@@ -7,7 +7,7 @@ Companion plan: [PLAN.md](./PLAN.md). Known limits and deferred ideas: [ISSUES.m
 
 ![Side-by-side: manual banner workflow vs clipstash](./assets/case-study-savings.svg)
 
-*Create banner (−) is the same either way. The hotkey removes the filing and spreadsheet steps.*
+*The hotkey does the paperwork (named still + YAML). Create banner (−) can wait for a later pass.*
 
 ---
 
@@ -37,16 +37,21 @@ Repeat across YouTube, TikTok, Instagram, and Twitter/X — and across dozens or
 
 ## With clipstash
 
-Simple path (good when you can pause on the frame you want):
+The hotkey does the paperwork: saves the still with a usable name, writes the YAML (title, URL, and the rest), and keeps a log you can walk later. You can batch a pile of captures first, then come back and do all the marketing / Photoshop work in a separate pass.
+
+Capture pass (good when you can pause on the frame you want):
 
 1. Open the video URL
-2. Hotkey → still saved, organized, URL logged, optional place into Photoshop
-3. Create banner (−)
+2. Hotkey → still saved, named/organized, recorded in YAML
+
+Later (when you are ready to make banners):
+
+3. Create banner (−) — open the stills (or optional Photoshop place) and do the image work
 4. Export
 
-Create banner is the same either way (−). What the tool removes is screenshot filing, dragging into Photoshop, naming, and the Excel name/URL bookkeeping. Fast, and it keeps its own record.
+Create banner is the same either way (−). What the tool removes on the capture pass is screenshot filing, naming, and the Excel name/URL bookkeeping. Fast, and self-documenting.
 
-**Optional:** burst / bracket frames around the pause when the moment is hard (blink, mid-motion). Not required when the pause is already right — short clips often are. Case study default is the hotkey path; burst is the extra.
+**Optional:** burst / bracket frames around the pause when the moment is hard (blink, mid-motion). Not required when the pause is already right — short clips often are. Case study default is the hotkey path; burst is the extra. Photoshop place is optional too — handy if you want the still dropped into a doc during capture, not required if you batch screenshots first.
 
 Clipboard history in the extension is a convenience. The **packet** is the source of truth:
 
