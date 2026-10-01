@@ -16,6 +16,7 @@ from helper import __version__
 from helper import bursts
 from helper.bursts import create_burst, load_session, session_dir
 from helper.config import (
+    ConfigError,
     default_packet_root,
     effective_packet_root,
     load_config,
@@ -584,6 +585,86 @@ def test_effective_packet_root_priority(monkeypatch, tmp_path):
     # Default with no overrides at all.
     monkeypatch.delenv("CLIPSTASH_ROOT")
     assert effective_packet_root(None, config_path=tmp_path / "missing.json") == default_root()
+
+
+# --------------------------------------------------------------------------
+# unusable config.json: visible error, never a silent fallback root
+# --------------------------------------------------------------------------
+
+def test_missing_config_file_still_gives_default_root(monkeypatch, tmp_path):
+    monkeypatch.delenv("CLIPSTASH_ROOT", raising=False)
+    missing = tmp_path / "missing.json"
+    assert load_config(missing) == {}
+    assert effective_packet_root(None, config_path=missing) == default_root()
+
+
+@pytest.mark.parametrize("content", ["{not json", "[1, 2]", "\"just a string\""])
+def test_corrupt_config_raises_naming_the_file(tmp_path, content):
+    config_path = tmp_path / "config.json"
+    config_path.write_text(content, encoding="utf-8")
+    with pytest.raises(ConfigError, match=str(config_path)):
+        load_config(config_path)
+    with pytest.raises(ConfigError, match=str(config_path)):
+        effective_packet_root(None, config_path=config_path)
+
+
+@pytest.mark.parametrize("bad_root", ["relative/path", "", "   ", 42, None])
+def test_invalid_configured_root_raises_instead_of_falling_back(monkeypatch, tmp_path, bad_root):
+    monkeypatch.setenv("CLIPSTASH_ROOT", str(tmp_path / "env"))
+    config_path = tmp_path / "config.json"
+    save_config({"packet_root": bad_root}, config_path)
+    with pytest.raises(ConfigError, match="invalid packet_root in config file"):
+        effective_packet_root(None, config_path=config_path)
+    # An explicit CLI root still wins without reading the config.
+    assert effective_packet_root(tmp_path / "cli", config_path=config_path) == tmp_path / "cli"
+
+
+def test_create_server_refuses_corrupt_config(tmp_path):
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{not json", encoding="utf-8")
+    with pytest.raises(ConfigError, match=str(config_path)):
+        create_server(host="127.0.0.1", port=0, root=None, config_path=config_path)
+
+
+def test_cli_exits_nonzero_with_message_on_corrupt_config(monkeypatch, tmp_path, capsys):
+    from helper.cli import main
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    config_path = tmp_path / "Clipstash" / "config.json"
+    config_path.parent.mkdir()
+    config_path.write_text("{not json", encoding="utf-8")
+    assert main(["export"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "clipstashd: cannot read config file" in captured.err
+    assert str(config_path) in captured.err
+
+
+def test_cli_exits_nonzero_on_relative_configured_root(monkeypatch, tmp_path, capsys):
+    from helper.cli import main
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    config_path = tmp_path / "Clipstash" / "config.json"
+    save_config({"packet_root": "relative/path"}, config_path)
+    assert main(["serve"]) == 1
+    assert "invalid packet_root in config file" in capsys.readouterr().err
+
+
+def test_put_config_reports_corrupt_config_file(server):
+    config_path = Path(server.RequestHandlerClass.config_path)
+    config_path.write_text("{not json", encoding="utf-8")
+    new_root = config_path.parent / "new-root"
+    status, _, body = request(
+        server_url(server, "/config"),
+        data=json.dumps({"packet_root": str(new_root)}).encode("utf-8"),
+        method="PUT",
+    )
+    payload = json.loads(body)
+    assert status == 500
+    assert payload["ok"] is False
+    assert str(config_path) in payload["error"]
+    # The unreadable file is left for the user to inspect, not overwritten.
+    assert config_path.read_text(encoding="utf-8") == "{not json"
 
 
 # --------------------------------------------------------------------------

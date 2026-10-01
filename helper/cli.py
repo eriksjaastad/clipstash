@@ -48,7 +48,9 @@ Packets default to ``~/Clipstash/packets/<site>/<id>/<slug>.png`` +
 ``record.yaml`` (``<site>`` = youtube | tiktok | instagram | x | generic;
 ``<slug>`` = slugified video title or popup type-in). Change the root from the
 extension Options page (writes ``~/Clipstash/config.json``) or with
-``--root`` / ``CLIPSTASH_ROOT``.
+``--root`` / ``CLIPSTASH_ROOT``. If ``config.json`` exists but is unreadable,
+is not valid JSON, or holds an invalid ``packet_root``, clipstashd prints an
+error naming the file and exits 1 instead of saving somewhere else.
 
 Setup
 -----
@@ -107,11 +109,12 @@ import os
 import sys
 
 from . import __version__
-from .config import effective_packet_root
+from .config import ConfigError, effective_packet_root
 from .packets import export_csv
 
 
 def _env_bool(name: str) -> bool:
+    # governance: allow-silent SF003: optional opt-in flag; unset/empty means off, which this returns as False
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
 
 
@@ -161,8 +164,14 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     command = args.command or "serve"
 
+    try:
+        root = effective_packet_root(getattr(args, "root", None))
+    except ConfigError as exc:
+        sys.stderr.write(f"clipstashd: {exc}\n")
+        return 1
+
     if command == "export":
-        sys.stdout.write(export_csv(effective_packet_root(getattr(args, "root", None))))
+        sys.stdout.write(export_csv(root))
         return 0
 
     from .server import run_server
@@ -170,7 +179,7 @@ def main(argv: list[str] | None = None) -> int:
     run_server(
         host=args.host,
         port=args.port,
-        root=effective_packet_root(getattr(args, "root", None)),
+        root=root,
         photoshop_auto=getattr(args, "photoshop", False),
     )
     return 0

@@ -203,6 +203,7 @@ def is_macos() -> bool:
 
 def env_photoshop_enabled() -> bool:
     """True when CLIPSTASH_PHOTOSHOP requests auto-place (1/true/yes/on)."""
+    # governance: allow-silent SF003: optional opt-in flag; unset/empty means Photoshop auto-place is off
     return os.environ.get("CLIPSTASH_PHOTOSHOP", "").strip().lower() in (
         "1",
         "true",

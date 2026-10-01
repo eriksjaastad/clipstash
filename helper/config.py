@@ -11,16 +11,26 @@ demand) where ``config.json`` is the value of ``CONFIG_FILENAME``. Changing
 the root never moves or deletes existing packets; new saves go to the new
 root.
 
+A missing config file means "nothing configured yet". A config file that
+exists but cannot be used (unreadable, invalid JSON, not a JSON object, or a
+``packet_root`` that ``normalize_packet_root`` rejects) raises ``ConfigError``
+naming the file, rather than silently saving packets to a different root.
+
 Public API
 ----------
 ``CONFIG_FILENAME``
     Name of the on-disk config file: ``config.json``.
 
+``ConfigError``
+    Raised when the config file exists but is unusable; the message names
+    the file and the problem. Subclass of ``ValueError``.
+
 ``default_config_path()``
     Config file path: ``~/Clipstash/config.json``.
 
 ``load_config(config_path=None)``
-    Load the helper config; tolerate missing/invalid files as ``{}``.
+    Load the helper config. A missing file is ``{}``; an unreadable file,
+    invalid JSON, or a non-object raises ``ConfigError``.
 
 ``save_config(config, config_path=None)``
     Persist the helper config, creating the parent directory as needed.
@@ -34,7 +44,8 @@ Public API
 
 ``effective_packet_root(cli_root=None, config_path=None)``
     Resolve the packet root by priority: CLI ``--root`` > config file
-    ``packet_root`` > ``CLIPSTASH_ROOT`` > ``~/Clipstash/packets``.
+    ``packet_root`` > ``CLIPSTASH_ROOT`` > ``~/Clipstash/packets``. A
+    ``packet_root`` present in the config but invalid raises ``ConfigError``.
 """
 
 from __future__ import annotations
@@ -49,20 +60,35 @@ from .packets import default_root
 CONFIG_FILENAME = "config.json"
 
 
+class ConfigError(ValueError):
+    """The config file exists but is unusable; the message names the file."""
+
+
 def default_config_path() -> Path:
     """Config file path: ~/Clipstash/config.json."""
     return Path.home() / "Clipstash" / CONFIG_FILENAME
 
 
 def load_config(config_path: str | Path | None = None) -> dict[str, Any]:
-    """Load the helper config; tolerate missing/invalid files as ``{}``."""
+    """Load the helper config.
+
+    A missing file is ``{}`` (nothing configured yet). An unreadable file,
+    invalid JSON, or a top-level value that is not an object raises
+    ``ConfigError`` naming the file.
+    """
     path = Path(config_path) if config_path else default_config_path()
     try:
         with path.open("r", encoding="utf-8") as fh:
             data = json.load(fh)
-    except (OSError, json.JSONDecodeError):
+    except FileNotFoundError:  # governance: allow-silent SF002: no config file yet; {} means nothing configured and effective_packet_root falls through to $CLIPSTASH_ROOT or the default root
         return {}
-    return data if isinstance(data, dict) else {}
+    except (OSError, ValueError) as exc:  # ValueError covers JSONDecodeError and UnicodeDecodeError
+        raise ConfigError(f"cannot read config file {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ConfigError(
+            f"config file {path} must contain a JSON object, not {type(data).__name__}"
+        )
+    return data
 
 
 def save_config(config: dict[str, Any], config_path: str | Path | None = None) -> None:
@@ -98,14 +124,19 @@ def effective_packet_root(
     cli_root: str | Path | None = None,
     config_path: str | Path | None = None,
 ) -> Path:
-    """Resolve the packet root by priority: CLI > config file > env > default."""
+    """Resolve the packet root by priority: CLI > config file > env > default.
+
+    Raises ``ConfigError`` when the config file is unusable or holds a
+    ``packet_root`` that ``normalize_packet_root`` (the ``PUT /config``
+    validation) rejects; it never falls back past a configured root.
+    """
     if cli_root:
         return Path(cli_root).expanduser()
-    config = load_config(config_path)
-    configured = config.get("packet_root")
-    if configured:
+    path = Path(config_path) if config_path else default_config_path()
+    config = load_config(path)
+    if "packet_root" in config:
         try:
-            return normalize_packet_root(configured)
-        except ValueError:
-            pass
+            return normalize_packet_root(config["packet_root"])
+        except ValueError as exc:
+            raise ConfigError(f"invalid packet_root in config file {path}: {exc}") from exc
     return default_root()
