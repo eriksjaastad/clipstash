@@ -45,7 +45,7 @@ def frame_filename(index: int) -> str:
 def _is_expired(created_at: str) -> bool:
     try:
         created = datetime.fromisoformat(created_at)
-    except ValueError:
+    except ValueError:  # governance: allow-silent SF002: fail-safe for deletion; purge_expired_bursts never removes a session whose age it cannot determine
         return False
     if created.tzinfo is None:
         created = created.replace(tzinfo=timezone.utc)
@@ -176,7 +176,7 @@ def _optional_float(value: Any) -> float | None:
         return None
     try:
         return float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError):  # governance: allow-silent SF002: timestamp_sec is optional packet metadata; a non-numeric value is recorded as absent (None), as is an empty one
         return None
 
 

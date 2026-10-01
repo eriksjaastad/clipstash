@@ -60,6 +60,7 @@ from .bursts import (
     session_dir,
 )
 from .config import (
+    ConfigError,
     default_config_path,
     default_packet_root,
     effective_packet_root,
@@ -111,7 +112,7 @@ def _parse_json_object(value: Any) -> dict[str, Any] | None:
         return None
     try:
         parsed = json.loads(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError):  # governance: allow-silent SF002: an unusable crop_rect means "no crop", the same contract apply_crop_rect has for invalid rects (test_apply_crop_rect_invalid_rects_return_original_bytes)
         return None
     return parsed if isinstance(parsed, dict) else None
 
@@ -188,7 +189,7 @@ def _optional_float(value: str | None) -> float | None:
         return None
     try:
         return float(value)
-    except ValueError:
+    except ValueError:  # governance: allow-silent SF002: timestamp_sec is optional packet metadata; a non-numeric value is recorded as absent (None), as is an empty one
         return None
 
 
@@ -501,6 +502,9 @@ class ClipStashHandler(BaseHTTPRequestHandler):
                 self._update_config(body)
                 return
             self._send_json({"ok": False, "error": "not found"}, 404)
+        except ConfigError as exc:
+            # The on-disk config.json is unusable; not the request's fault.
+            self._send_json({"ok": False, "error": str(exc)}, 500)
         except (ValueError, json.JSONDecodeError) as exc:
             self._send_json({"ok": False, "error": str(exc)}, 400)
         except OSError as exc:
