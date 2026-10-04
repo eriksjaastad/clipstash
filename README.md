@@ -8,11 +8,7 @@ Chrome-first tool that captures a still from a page video (YouTube, X/Twitter, I
 
 ## Status
 
-Early public extract. See [PLAN.md](./PLAN.md); known gaps in [ISSUES.md](./ISSUES.md). Story of the extract: [CASESTUDY.md](./CASESTUDY.md).
-
-## Board
-
-http://localhost:8000/kanban/clipstash (private Erik board)
+See [PLAN.md](./PLAN.md); known gaps in [ISSUES.md](./ISSUES.md). Story of the extract: [CASESTUDY.md](./CASESTUDY.md).
 
 ## Layout
 
@@ -28,12 +24,12 @@ tests/               pytest for the helper
 ```bash
 ./scripts/dev_up.sh     # one-command dev env: .venv + deps + serve in foreground
 # or, manually:
-python3 -m helper       # serves on http://127.0.0.1:8787
+python3 -m helper       # local HTTP API
 ```
 
 Stranger install (macOS): Homebrew formula (`packaging/homebrew/README.md`) or single-binary scripts (`scripts/build_macos_binary.sh` then `scripts/install_macos_helper.sh`). Full stranger setup (venv, `pip install -e .` / `uv sync`, `clipstashd`, troubleshooting) is in `clipstashd --help`; the `scripts/dev_up.sh` header has the one-shot clone/setup pointers. For a login LaunchAgent, follow the comments in `packaging/macos/com.clipstash.helper.plist`.
 
-## Load the extension (unpacked, MV3)
+## Load the extension (unpacked, MV3, not the Chrome Web Store)
 
 1. Open `chrome://extensions`.
 2. Enable **Developer mode**.
@@ -65,4 +61,4 @@ node scripts/smoke_extension.mjs    # extension JS: adapters + taint fallback (n
 
 ## License
 
-MIT
+[MIT](LICENSE) — Copyright (c) 2026 Erik Sjaastad
