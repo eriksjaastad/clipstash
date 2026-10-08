@@ -10,12 +10,10 @@ from __future__ import annotations
 import json
 import shutil
 import tempfile
-import threading
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 import pytest
+from support import request, server_url
 
 import helper.ffmpeg_burst as ffmpeg_burst
 from helper.ffmpeg_burst import (
@@ -26,7 +24,6 @@ from helper.ffmpeg_burst import (
     ffmpeg_available,
 )
 from helper.packets import read_record
-from helper.server import create_server
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "sample_burst.mp4"
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
@@ -34,44 +31,6 @@ PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 pytestmark = pytest.mark.skipif(
     not ffmpeg_available(), reason="ffmpeg not on PATH (brew install ffmpeg)"
 )
-
-
-def request(
-    url: str,
-    data: bytes | None = None,
-    method: str | None = None,
-    headers: dict | None = None,
-):
-    headers = dict(headers or {})
-    if method in ("POST", "PUT") and data is not None and "Content-Type" not in headers:
-        headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(url, data=data, method=method, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return resp.status, resp.headers.get("Content-Type"), resp.read()
-    except urllib.error.HTTPError as exc:
-        return exc.code, exc.headers.get("Content-Type"), exc.read()
-
-
-def server_url(httpd, path: str) -> str:
-    host, port = httpd.server_address
-    return f"http://{host}:{port}{path}"
-
-
-@pytest.fixture()
-def server(tmp_path):
-    httpd = create_server(
-        host="127.0.0.1",
-        port=0,
-        root=str(tmp_path),
-        config_path=tmp_path / "config.json",
-    )
-    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-    thread.start()
-    yield httpd
-    httpd.shutdown()
-    thread.join(timeout=5)
-    httpd.server_close()
 
 
 # --------------------------------------------------------------------------

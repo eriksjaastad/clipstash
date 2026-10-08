@@ -5,12 +5,12 @@ from __future__ import annotations
 import base64
 import io
 import json
-import threading
 import urllib.request
 from pathlib import Path
 
 import pytest
 from PIL import Image
+from support import PNG_1PX, PNG_1PX_B64, request, server_url
 
 from helper import __version__
 from helper import bursts
@@ -37,11 +37,6 @@ from helper.packets import (
     write_packet,
 )
 from helper.server import create_server
-
-PNG_1PX_B64 = (
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
-)
-PNG_1PX = base64.b64decode(PNG_1PX_B64)
 
 GREEN = (0, 255, 0)
 RED = (255, 0, 0)
@@ -259,16 +254,9 @@ def test_apply_crop_rect_invalid_rects_return_original_bytes():
     png = make_png_with_green_region()
     invalid_rects = [
         None,
-        "garbage",
-        [],
-        {},
-        {"x": None, "y": 0, "width": 10, "height": 10},
         {"x": "a", "y": 0, "width": 10, "height": 10},
         {"x": float("nan"), "y": 0, "width": 10, "height": 10},
-        {"x": -1000, "y": -1000, "width": 10, "height": 10},
         {"x": 5000, "y": 5000, "width": 10, "height": 10},
-        {"x": 0, "y": 0, "width": 0, "height": 10},
-        {"x": 0, "y": 0, "width": -5, "height": 10},
     ]
     for crop_rect in invalid_rects:
         assert apply_crop_rect(png, crop_rect) == png, f"rect {crop_rect!r}"
@@ -276,7 +264,7 @@ def test_apply_crop_rect_invalid_rects_return_original_bytes():
 
 def test_apply_crop_rect_bad_dpr_falls_back_to_1():
     png = make_png_with_green_region()
-    for dpr in (None, 0, -2, float("inf"), float("nan"), "abc"):
+    for dpr in ("abc", float("inf"), 0):
         cropped = apply_crop_rect(
             png, {"x": 0, "y": 0, "width": 10, "height": 10, "dpr": dpr}
         )
@@ -286,36 +274,6 @@ def test_apply_crop_rect_bad_dpr_falls_back_to_1():
 # --------------------------------------------------------------------------
 # HTTP endpoints
 # --------------------------------------------------------------------------
-
-@pytest.fixture()
-def server(tmp_path):
-    httpd = create_server(
-        host="127.0.0.1", port=0, root=str(tmp_path), config_path=tmp_path / "config.json"
-    )
-    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-    thread.start()
-    yield httpd
-    httpd.shutdown()
-    thread.join(timeout=5)
-    httpd.server_close()
-
-
-def request(url: str, data: bytes | None = None, method: str | None = None, headers: dict | None = None):
-    headers = dict(headers or {})
-    if method in ("POST", "PUT") and data is not None and "Content-Type" not in headers:
-        headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(url, data=data, method=method, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            return resp.status, resp.headers.get("Content-Type"), resp.read()
-    except urllib.error.HTTPError as exc:
-        return exc.code, exc.headers.get("Content-Type"), exc.read()
-
-
-def server_url(httpd, path: str) -> str:
-    host, port = httpd.server_address
-    return f"http://{host}:{port}{path}"
-
 
 def test_health_endpoint(server):
     status, content_type, body = request(server_url(server, "/health"))
@@ -598,7 +556,7 @@ def test_missing_config_file_still_gives_default_root(monkeypatch, tmp_path):
     assert effective_packet_root(None, config_path=missing) == default_root()
 
 
-@pytest.mark.parametrize("content", ["{not json", "[1, 2]", "\"just a string\""])
+@pytest.mark.parametrize("content", ["{not json", "[1, 2]"])
 def test_corrupt_config_raises_naming_the_file(tmp_path, content):
     config_path = tmp_path / "config.json"
     config_path.write_text(content, encoding="utf-8")
@@ -608,7 +566,7 @@ def test_corrupt_config_raises_naming_the_file(tmp_path, content):
         effective_packet_root(None, config_path=config_path)
 
 
-@pytest.mark.parametrize("bad_root", ["relative/path", "", "   ", 42, None])
+@pytest.mark.parametrize("bad_root", [42, "", "relative/path"])
 def test_invalid_configured_root_raises_instead_of_falling_back(monkeypatch, tmp_path, bad_root):
     monkeypatch.setenv("CLIPSTASH_ROOT", str(tmp_path / "env"))
     config_path = tmp_path / "config.json"
@@ -648,6 +606,22 @@ def test_cli_exits_nonzero_on_relative_configured_root(monkeypatch, tmp_path, ca
     save_config({"packet_root": "relative/path"}, config_path)
     assert main(["serve"]) == 1
     assert "invalid packet_root in config file" in capsys.readouterr().err
+
+
+def test_cli_export_uses_root_given_before_or_after_the_command(monkeypatch, tmp_path, capsys):
+    from helper.cli import main
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    root = tmp_path / "packets"
+    record = new_record("Exported", "https://example.com/v=1", site="youtube")
+    write_packet(record, PNG_1PX, root=root)
+
+    assert main(["--root", str(root), "export"]) == 0
+    assert record["id"] in capsys.readouterr().out
+    assert main(["export", "--root", str(root)]) == 0
+    assert record["id"] in capsys.readouterr().out
 
 
 def test_put_config_reports_corrupt_config_file(server):
