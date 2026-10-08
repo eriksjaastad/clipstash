@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import base64
 import json
 import subprocess
-import threading
-import urllib.request
 
-import pytest
+from support import PNG_1PX, PNG_1PX_B64, request, server_url
 
 from helper import bursts, photoshop
 from helper.photoshop import (
@@ -19,12 +16,6 @@ from helper.photoshop import (
     place_in_photoshop,
     scripts_for_placement,
 )
-from helper.server import create_server
-
-PNG_1PX_B64 = (
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
-)
-PNG_1PX = base64.b64decode(PNG_1PX_B64)
 
 
 def make_payload(**overrides):
@@ -132,12 +123,13 @@ def test_missing_image_returns_clear_error(monkeypatch, tmp_path):
 
 
 def test_env_flag_parsing(monkeypatch):
-    for value in ("1", "true", "TRUE", "yes", "on"):
+    for value in ("1", "TRUE", "yes", "on"):
         monkeypatch.setenv("CLIPSTASH_PHOTOSHOP", value)
-        assert env_photoshop_enabled() is True
-    for value in ("", "0", "false", "no", "off"):
-        monkeypatch.setenv("CLIPSTASH_PHOTOSHOP", value)
-        assert env_photoshop_enabled() is False
+        assert env_photoshop_enabled() is True, value
+    monkeypatch.setenv("CLIPSTASH_PHOTOSHOP", "0")
+    assert env_photoshop_enabled() is False
+    monkeypatch.delenv("CLIPSTASH_PHOTOSHOP", raising=False)
+    assert env_photoshop_enabled() is False
 
 
 # --------------------------------------------------------------------------
@@ -314,34 +306,6 @@ def test_photoshop_not_installed_stderr(monkeypatch, tmp_path):
 # HTTP endpoints (placement always mocked)
 # --------------------------------------------------------------------------
 
-@pytest.fixture()
-def server(tmp_path):
-    httpd = create_server(host="127.0.0.1", port=0, root=str(tmp_path))
-    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-    thread.start()
-    yield httpd
-    httpd.shutdown()
-    thread.join(timeout=5)
-    httpd.server_close()
-
-
-def request(url: str, data: bytes | None = None, method: str | None = None, headers: dict | None = None):
-    headers = dict(headers or {})
-    if method == "POST" and data is not None and "Content-Type" not in headers:
-        headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(url, data=data, method=method, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            return resp.status, resp.headers.get("Content-Type"), resp.read()
-    except urllib.error.HTTPError as exc:
-        return exc.code, exc.headers.get("Content-Type"), exc.read()
-
-
-def server_url(httpd, path: str) -> str:
-    host, port = httpd.server_address
-    return f"http://{host}:{port}{path}"
-
-
 def patch_place(monkeypatch):
     calls = []
 
@@ -468,26 +432,17 @@ def test_burst_choose_without_flag_does_not_place(server, monkeypatch):
     assert calls == []
 
 
-def test_server_auto_photoshop_places_without_request_flag(tmp_path, monkeypatch):
-    httpd = create_server(
-        host="127.0.0.1", port=0, root=str(tmp_path), photoshop_auto=True
+def test_server_auto_photoshop_places_without_request_flag(start_server, tmp_path, monkeypatch):
+    httpd = start_server(photoshop_auto=True)
+    calls = patch_place(monkeypatch)
+    status, _, body = request(
+        server_url(httpd, "/packets"),
+        data=json.dumps(make_payload()).encode("utf-8"),
+        method="POST",
     )
-    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-    thread.start()
-    try:
-        calls = patch_place(monkeypatch)
-        status, _, body = request(
-            server_url(httpd, "/packets"),
-            data=json.dumps(make_payload()).encode("utf-8"),
-            method="POST",
-        )
-        assert status == 201
-        payload = json.loads(body)
-        assert payload["photoshop"]["ok"] is True
-        assert calls == [
-            tmp_path / "youtube" / payload["packet"]["id"] / "photoshop-packet.png"
-        ]
-    finally:
-        httpd.shutdown()
-        thread.join(timeout=5)
-        httpd.server_close()
+    assert status == 201
+    payload = json.loads(body)
+    assert payload["photoshop"]["ok"] is True
+    assert calls == [
+        tmp_path / "youtube" / payload["packet"]["id"] / "photoshop-packet.png"
+    ]

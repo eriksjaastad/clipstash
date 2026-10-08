@@ -20,8 +20,8 @@ export
     Print packets as CSV to stdout and exit.
 
     ``export --root``
-        Packet root directory (default ``$CLIPSTASH_ROOT``, then
-        ``~/Clipstash/packets``).
+        Packet root directory (default ``config.json``, then
+        ``$CLIPSTASH_ROOT``, then ``~/Clipstash/packets``).
 
 Options
 -------
@@ -30,8 +30,8 @@ Options
 ``--port``
     Port to listen on (default 8787 or ``$CLIPSTASH_PORT``).
 ``--root``
-    Packet root directory (default ``~/Clipstash/packets`` or
-    ``$CLIPSTASH_ROOT``).
+    Packet root directory (default ``config.json``, then
+    ``$CLIPSTASH_ROOT``, then ``~/Clipstash/packets``).
 ``--version``
     Print the clipstashd version and exit.
 
@@ -140,7 +140,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--root",
         default=None,
-        help="packet root directory (default ~/Clipstash/packets or $CLIPSTASH_ROOT)",
+        help="packet root directory (default config.json, then $CLIPSTASH_ROOT, then ~/Clipstash/packets)",
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -154,7 +154,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     export_parser = subparsers.add_parser("export", help="print packets as CSV and exit")
-    export_parser.add_argument("--root", default=None, help="packet root directory")
+    # SUPPRESS: an omitted subcommand --root must not overwrite a global --root.
+    export_parser.add_argument("--root", default=argparse.SUPPRESS, help="packet root directory")
     export_parser.set_defaults(command="export")
 
     return parser
