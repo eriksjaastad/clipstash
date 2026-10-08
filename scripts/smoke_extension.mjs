@@ -836,10 +836,18 @@ function checkHelperBody(label, body = {}, fields) {
   checkFields(label, body, { ...SHARED_BODY, ...fields });
 }
 
+// A success injects `files` once into the stubbed tab 7, and any visible-tab
+// capture targets that tab's window 3.
+function checkTabAccess(label, bg, files) {
+  check(sameJson(bg.injections, [{ tabId: 7, files }]), `${label} injects ${files.join(" + ")} into tab 7`);
+  check(bg.captureWindows.every((id) => id === 3), `${label} captures window 3 only`);
+}
+
 // Every SAVE_PACKET success returns the helper's packet and photoshop result,
 // stores the history entry, and stays out of the burst machinery.
 function checkSavePacketSuccess(label, bg, response) {
   checkFields(`${label} response`, response, { ok: true, packet: PACKET, photoshop: PHOTOSHOP_PLACED });
+  checkTabAccess(label, bg, ["lib/adapters.js", "content.js"]);
   check(sameJson(bg.storage.clipstashHistory, [PACKET_HISTORY_ENTRY]), `${label} stores the full history entry`);
   check(bg.openedTabs.length === 0, `${label} opens no tab`);
   check(bg.pollStarts() === 0, `${label} starts no pending-history polling`);
@@ -850,6 +858,7 @@ function checkSavePacketSuccess(label, bg, response) {
 // picker reports the chosen frame.
 function checkBurstPickSuccess(label, bg, response, expected) {
   checkFields(`${label} response`, response, expected);
+  checkTabAccess(label, bg, ["lib/adapters.js", "lib/burst.js"]);
   check(bg.openedTabs.join() === expected.picker_url, `${label} opens only the picker tab`);
   check(bg.pollStarts() === 1, `${label} starts pending-history polling once`);
   check(bg.storage.clipstashHistory === undefined, `${label} writes no history before the pick`);
@@ -861,7 +870,8 @@ function loadBackground({ tabUrl = VIDEO_META.pageUrl, scriptResult, responses =
   const fetched = [];
   const openedTabs = [];
   const storage = {};
-  let visibleTabCaptures = 0;
+  const injections = [];
+  const captureWindows = [];
   let pollStarts = 0;
   let listener = null;
   const sandbox = {
@@ -888,8 +898,8 @@ function loadBackground({ tabUrl = VIDEO_META.pageUrl, scriptResult, responses =
       },
       tabs: {
         query: async () => [{ id: 7, windowId: 3, url: tabUrl }],
-        captureVisibleTab(_windowId, _opts, callback) {
-          visibleTabCaptures += 1;
+        captureVisibleTab(windowId, _opts, callback) {
+          captureWindows.push(windowId);
           callback(VISIBLE_TAB_PNG);
         },
         create(opts, callback) {
@@ -897,7 +907,12 @@ function loadBackground({ tabUrl = VIDEO_META.pageUrl, scriptResult, responses =
           callback({ id: 8 });
         },
       },
-      scripting: { executeScript: async () => [{ result: scriptResult }] },
+      scripting: {
+        executeScript: async ({ target, files }) => {
+          injections.push({ tabId: target.tabId, files });
+          return [{ result: scriptResult }];
+        },
+      },
       storage: {
         local: {
           get: async (key) => ({ [key]: storage[key] }),
@@ -913,7 +928,9 @@ function loadBackground({ tabUrl = VIDEO_META.pageUrl, scriptResult, responses =
     fetched,
     openedTabs,
     storage,
-    visibleTabCaptures: () => visibleTabCaptures,
+    injections,
+    captureWindows,
+    visibleTabCaptures: () => captureWindows.length,
     pollStarts: () => pollStarts,
     paths: () => fetched.map((entry) => new URL(entry.url).pathname),
   };

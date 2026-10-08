@@ -128,6 +128,8 @@ def test_env_flag_parsing(monkeypatch):
         assert env_photoshop_enabled() is True, value
     monkeypatch.setenv("CLIPSTASH_PHOTOSHOP", "0")
     assert env_photoshop_enabled() is False
+    monkeypatch.delenv("CLIPSTASH_PHOTOSHOP", raising=False)
+    assert env_photoshop_enabled() is False
 
 
 # --------------------------------------------------------------------------
