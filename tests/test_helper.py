@@ -253,10 +253,12 @@ def test_apply_crop_rect_device_pixel_ratio():
 def test_apply_crop_rect_invalid_rects_return_original_bytes():
     png = make_png_with_green_region()
     invalid_rects = [
-        None,
-        {"x": "a", "y": 0, "width": 10, "height": 10},
-        {"x": float("nan"), "y": 0, "width": 10, "height": 10},
-        {"x": 5000, "y": 5000, "width": 10, "height": 10},
+        None,  # not a dict
+        {"x": None, "y": 0, "width": 10, "height": 10},  # TypeError
+        {"x": "a", "y": 0, "width": 10, "height": 10},  # ValueError
+        {"x": float("nan"), "y": 0, "width": 10, "height": 10},  # non-finite
+        {"x": -1000, "y": -1000, "width": 10, "height": 10},  # clamped below zero, degenerate
+        {"x": 5000, "y": 5000, "width": 10, "height": 10},  # clamped past the image, degenerate
     ]
     for crop_rect in invalid_rects:
         assert apply_crop_rect(png, crop_rect) == png, f"rect {crop_rect!r}"
@@ -264,7 +266,13 @@ def test_apply_crop_rect_invalid_rects_return_original_bytes():
 
 def test_apply_crop_rect_bad_dpr_falls_back_to_1():
     png = make_png_with_green_region()
-    for dpr in ("abc", float("inf"), 0):
+    bad_dprs = [
+        None,  # TypeError
+        "abc",  # ValueError
+        float("inf"),  # non-finite
+        0,  # not positive
+    ]
+    for dpr in bad_dprs:
         cropped = apply_crop_rect(
             png, {"x": 0, "y": 0, "width": 10, "height": 10, "dpr": dpr}
         )
