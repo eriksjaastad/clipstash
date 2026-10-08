@@ -871,6 +871,7 @@ function loadBackground({ tabUrl = VIDEO_META.pageUrl, scriptResult, responses =
   check(response.ok === true && bg.visibleTabCaptures() === 1, "background SAVE_PACKET tainted uses captureVisibleTab");
   check(body.capture_method === "visible_tab" && body.image_base64 === "VISIBLETAB", "background SAVE_PACKET tainted POSTs the visible_tab still");
   check(JSON.stringify(body.crop_rect) === JSON.stringify(CROP_RECT), "background SAVE_PACKET tainted forwards crop_rect");
+  check(bg.storage.clipstashHistory?.[0]?.id === PACKET_OK[1].packet.id, "background SAVE_PACKET tainted stores the history entry");
 }
 
 {
@@ -899,6 +900,7 @@ const MEDIA_URL = "https://r1---sn-abc.googlevideo.com/videoplayback?expire=123"
   check(bg.fetched[0].body.media_url === MEDIA_URL, "background BURST_PICK tainted sends the media_url");
   check(bg.visibleTabCaptures() === 0, "background BURST_PICK ffmpeg OK skips captureVisibleTab");
   check(response.ok === true && response.capture_method === "burst_ffmpeg", "background BURST_PICK reports burst_ffmpeg");
+  check(bg.openedTabs.join() === FFMPEG_OK[1].picker_url, "background BURST_PICK ffmpeg OK opens the picker tab");
 }
 
 {
@@ -912,6 +914,7 @@ const MEDIA_URL = "https://r1---sn-abc.googlevideo.com/videoplayback?expire=123"
   check(bg.visibleTabCaptures() === 1 && response.ok === true, "background BURST_PICK ffmpeg 503 uses captureVisibleTab");
   check(body.capture_method === "burst_visible_tab" && body.frames?.length === 1, "background BURST_PICK fallback sends one burst_visible_tab frame");
   check(JSON.stringify(body.crop_rect) === JSON.stringify(CROP_RECT), "background BURST_PICK fallback forwards crop_rect");
+  check(bg.openedTabs.join() === BURSTS_OK[1].picker_url, "background BURST_PICK ffmpeg 503 opens only the /bursts picker tab");
 }
 
 {
@@ -919,6 +922,7 @@ const MEDIA_URL = "https://r1---sn-abc.googlevideo.com/videoplayback?expire=123"
   const response = await bg.send({ type: "BURST_PICK" });
   check(bg.paths().join() === "/bursts", "background BURST_PICK without mediaUrl never calls /bursts/ffmpeg");
   check(bg.visibleTabCaptures() === 1 && response.ok === true, "background BURST_PICK without mediaUrl uses captureVisibleTab");
+  check(bg.openedTabs.join() === BURSTS_OK[1].picker_url, "background BURST_PICK without mediaUrl opens the picker tab");
 }
 
 {
