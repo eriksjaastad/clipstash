@@ -20,7 +20,8 @@ export
     Print packets as CSV to stdout and exit.
 
     ``export --root``
-        Packet root directory (default ``config.json``, then ``$CLIPSTASH_ROOT``, then ``~/Clipstash/packets``).
+        Packet root directory (default ``config.json``, then
+        ``$CLIPSTASH_ROOT``, then ``~/Clipstash/packets``).
 
 Options
 -------
@@ -29,8 +30,8 @@ Options
 ``--port``
     Port to listen on (default 8787 or ``$CLIPSTASH_PORT``).
 ``--root``
-    Packet root directory (default ``~/Clipstash/packets`` or
-    ``$CLIPSTASH_ROOT``).
+    Packet root directory (default ``config.json``, then
+    ``$CLIPSTASH_ROOT``, then ``~/Clipstash/packets``).
 ``--version``
     Print the clipstashd version and exit.
 
@@ -139,7 +140,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--root",
         default=None,
-        help="packet root directory (default ~/Clipstash/packets or $CLIPSTASH_ROOT)",
+        help="packet root directory (default config.json, then $CLIPSTASH_ROOT, then ~/Clipstash/packets)",
     )
     subparsers = parser.add_subparsers(dest="command")
 

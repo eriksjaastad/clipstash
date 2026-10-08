@@ -123,8 +123,9 @@ def test_missing_image_returns_clear_error(monkeypatch, tmp_path):
 
 
 def test_env_flag_parsing(monkeypatch):
-    monkeypatch.setenv("CLIPSTASH_PHOTOSHOP", "TRUE")
-    assert env_photoshop_enabled() is True
+    for value in ("1", "TRUE", "yes", "on"):
+        monkeypatch.setenv("CLIPSTASH_PHOTOSHOP", value)
+        assert env_photoshop_enabled() is True, value
     monkeypatch.setenv("CLIPSTASH_PHOTOSHOP", "0")
     assert env_photoshop_enabled() is False
 
