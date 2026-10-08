@@ -780,13 +780,48 @@ const CROP_RECT = { x: 8, y: 120, width: 640, height: 360, dpr: 2 };
 const VIDEO_META = {
   title: "Background test",
   sourceUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-  pageUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+  // Differs from sourceUrl so a page_url/source_url mix-up is caught.
+  pageUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42",
   site: "youtube",
   timestampSec: 42.5,
 };
+const CANVAS_STILL = { ...VIDEO_META, ok: true, captureMethod: "canvas", imageDataUrl: "data:image/png;base64,CANVAS" };
 const PACKET_OK = [201, { ok: true, packet: { id: "01JBACKGROUND000000000000", title: "Background test", source_url: VIDEO_META.sourceUrl, created_at: "2026-10-08T12:00:00+00:00" } }];
+// What historyEntryFromPacket builds from PACKET_OK (no clipboard, so text is title + url).
+const PACKET_HISTORY_ENTRY = {
+  id: "01JBACKGROUND000000000000",
+  title: "Background test",
+  url: VIDEO_META.sourceUrl,
+  text: `Background test\n${VIDEO_META.sourceUrl}`,
+  createdAt: "2026-10-08T12:00:00+00:00",
+};
 const BURSTS_OK = [201, { ok: true, session_id: "s-canvas", picker_url: "http://127.0.0.1:8787/picker/s-canvas" }];
 const FFMPEG_OK = [201, { ok: true, session_id: "s-ffmpeg", picker_url: "http://127.0.0.1:8787/picker/s-ffmpeg", capture_method: "burst_ffmpeg" }];
+
+const sameJson = (actual, expected) => JSON.stringify(actual) === JSON.stringify(expected);
+
+// The POST /bursts body forwards VIDEO_META and carries exactly these frames.
+function burstPayloadMatches(body, expectedFrames) {
+  return (
+    body.title === VIDEO_META.title &&
+    body.source_url === VIDEO_META.sourceUrl &&
+    body.page_url === VIDEO_META.pageUrl &&
+    body.site === VIDEO_META.site &&
+    body.timestamp_sec === VIDEO_META.timestampSec &&
+    sameJson(body.frames, expectedFrames)
+  );
+}
+
+// Every BURST_PICK success opens the helper's picker tab, returns its
+// session_id and picker_url, and starts pending-history polling once.
+function checkBurstPickSuccess(label, bg, response, [, helper]) {
+  check(bg.openedTabs.join() === helper.picker_url, `${label} opens only the picker tab`);
+  check(
+    response.ok === true && response.session_id === helper.session_id && response.picker_url === helper.picker_url,
+    `${label} returns the session_id and picker_url`
+  );
+  check(bg.pollStarts() === 1, `${label} starts pending-history polling once`);
+}
 
 // Loads background.js with chrome/fetch stubs. `scriptResult` is what the
 // injected content script returns; `responses` maps helper path -> [status, json].
@@ -795,11 +830,15 @@ function loadBackground({ tabUrl = VIDEO_META.pageUrl, scriptResult, responses =
   const openedTabs = [];
   const storage = {};
   let visibleTabCaptures = 0;
+  let pollStarts = 0;
   let listener = null;
   const sandbox = {
     console,
     URL,
-    setInterval: () => 1,
+    setInterval: () => {
+      pollStarts += 1;
+      return 1;
+    },
     clearInterval: () => {},
     importScripts(path) {
       runInNewContext(readFileSync(join(root, "extension", path), "utf8"), sandbox, { filename: path });
@@ -843,22 +882,27 @@ function loadBackground({ tabUrl = VIDEO_META.pageUrl, scriptResult, responses =
     openedTabs,
     storage,
     visibleTabCaptures: () => visibleTabCaptures,
+    pollStarts: () => pollStarts,
     paths: () => fetched.map((entry) => new URL(entry.url).pathname),
   };
 }
 
 {
-  const bg = loadBackground({
-    scriptResult: { ...VIDEO_META, ok: true, captureMethod: "canvas", imageDataUrl: "data:image/png;base64,CANVAS" },
-    responses: { "/packets": PACKET_OK },
-  });
+  const bg = loadBackground({ scriptResult: CANVAS_STILL, responses: { "/packets": PACKET_OK } });
   const response = await bg.send({ type: "SAVE_PACKET", name: " My still " });
   const post = bg.fetched[0];
   check(response.ok === true && bg.paths().join() === "/packets", "background SAVE_PACKET canvas POSTs /packets only");
   check(post.method === "POST" && post.body.capture_method === "canvas", "background SAVE_PACKET canvas sends capture_method canvas");
   check(post.body.image_base64 === "CANVAS", "background SAVE_PACKET strips the data: prefix from image_base64");
   check(post.body.name === "My still", "background SAVE_PACKET forwards the trimmed name");
-  check(bg.storage.clipstashHistory?.[0]?.id === PACKET_OK[1].packet.id, "background SAVE_PACKET stores the history entry");
+  check(sameJson(bg.storage.clipstashHistory, [PACKET_HISTORY_ENTRY]), "background SAVE_PACKET stores the full history entry");
+}
+
+{
+  // Warm the captured-urls cache, prove it serves the repeat, then a save must force a refetch.
+  const bg = loadBackground({ scriptResult: CANVAS_STILL, responses: { "/packets": PACKET_OK } });
+  for (const type of ["GET_CAPTURED_URLS", "GET_CAPTURED_URLS", "SAVE_PACKET", "GET_CAPTURED_URLS"]) await bg.send({ type });
+  check(bg.fetched.map((entry) => entry.method).join() === "GET,POST,GET", "background SAVE_PACKET invalidates the captured-urls cache");
 }
 
 {
@@ -870,8 +914,8 @@ function loadBackground({ tabUrl = VIDEO_META.pageUrl, scriptResult, responses =
   const body = bg.fetched[0].body;
   check(response.ok === true && bg.visibleTabCaptures() === 1, "background SAVE_PACKET tainted uses captureVisibleTab");
   check(body.capture_method === "visible_tab" && body.image_base64 === "VISIBLETAB", "background SAVE_PACKET tainted POSTs the visible_tab still");
-  check(JSON.stringify(body.crop_rect) === JSON.stringify(CROP_RECT), "background SAVE_PACKET tainted forwards crop_rect");
-  check(bg.storage.clipstashHistory?.[0]?.id === PACKET_OK[1].packet.id, "background SAVE_PACKET tainted stores the history entry");
+  check(sameJson(body.crop_rect, CROP_RECT), "background SAVE_PACKET tainted forwards crop_rect");
+  check(sameJson(bg.storage.clipstashHistory, [PACKET_HISTORY_ENTRY]), "background SAVE_PACKET tainted stores the full history entry");
 }
 
 {
@@ -883,8 +927,9 @@ function loadBackground({ tabUrl = VIDEO_META.pageUrl, scriptResult, responses =
   const response = await bg.send({ type: "BURST_PICK" });
   const body = bg.fetched[0].body;
   check(response.ok === true && bg.paths().join() === "/bursts", "background BURST_PICK canvas POSTs /bursts only");
-  check(body.capture_method === "burst_canvas" && body.frames.length === 2, "background BURST_PICK canvas sends burst_canvas frames");
-  check(bg.openedTabs.join() === BURSTS_OK[1].picker_url, "background BURST_PICK canvas opens the picker tab");
+  check(body.capture_method === "burst_canvas", "background BURST_PICK canvas sends capture_method burst_canvas");
+  check(burstPayloadMatches(body, frames), "background BURST_PICK canvas forwards the metadata and canvas frames");
+  checkBurstPickSuccess("background BURST_PICK canvas", bg, response, BURSTS_OK);
 }
 
 const TAINTED_BURST = { ...VIDEO_META, ok: false, tainted: true, captureMethod: "burst_visible_tab", cropRect: CROP_RECT };
@@ -900,7 +945,7 @@ const MEDIA_URL = "https://r1---sn-abc.googlevideo.com/videoplayback?expire=123"
   check(bg.fetched[0].body.media_url === MEDIA_URL, "background BURST_PICK tainted sends the media_url");
   check(bg.visibleTabCaptures() === 0, "background BURST_PICK ffmpeg OK skips captureVisibleTab");
   check(response.ok === true && response.capture_method === "burst_ffmpeg", "background BURST_PICK reports burst_ffmpeg");
-  check(bg.openedTabs.join() === FFMPEG_OK[1].picker_url, "background BURST_PICK ffmpeg OK opens the picker tab");
+  checkBurstPickSuccess("background BURST_PICK ffmpeg OK", bg, response, FFMPEG_OK);
 }
 
 {
@@ -912,9 +957,10 @@ const MEDIA_URL = "https://r1---sn-abc.googlevideo.com/videoplayback?expire=123"
   const body = bg.fetched[1]?.body || {};
   check(bg.paths().join() === "/bursts/ffmpeg,/bursts", "background BURST_PICK ffmpeg 503 falls back to POST /bursts");
   check(bg.visibleTabCaptures() === 1 && response.ok === true, "background BURST_PICK ffmpeg 503 uses captureVisibleTab");
-  check(body.capture_method === "burst_visible_tab" && body.frames?.length === 1, "background BURST_PICK fallback sends one burst_visible_tab frame");
-  check(JSON.stringify(body.crop_rect) === JSON.stringify(CROP_RECT), "background BURST_PICK fallback forwards crop_rect");
-  check(bg.openedTabs.join() === BURSTS_OK[1].picker_url, "background BURST_PICK ffmpeg 503 opens only the /bursts picker tab");
+  check(body.capture_method === "burst_visible_tab", "background BURST_PICK fallback sends capture_method burst_visible_tab");
+  check(burstPayloadMatches(body, [VISIBLE_TAB_PNG]), "background BURST_PICK fallback forwards the metadata and the visible_tab frame");
+  check(sameJson(body.crop_rect, CROP_RECT), "background BURST_PICK fallback forwards crop_rect");
+  checkBurstPickSuccess("background BURST_PICK ffmpeg 503", bg, response, BURSTS_OK);
 }
 
 {
@@ -922,7 +968,8 @@ const MEDIA_URL = "https://r1---sn-abc.googlevideo.com/videoplayback?expire=123"
   const response = await bg.send({ type: "BURST_PICK" });
   check(bg.paths().join() === "/bursts", "background BURST_PICK without mediaUrl never calls /bursts/ffmpeg");
   check(bg.visibleTabCaptures() === 1 && response.ok === true, "background BURST_PICK without mediaUrl uses captureVisibleTab");
-  check(bg.openedTabs.join() === BURSTS_OK[1].picker_url, "background BURST_PICK without mediaUrl opens the picker tab");
+  check(burstPayloadMatches(bg.fetched[0].body, [VISIBLE_TAB_PNG]), "background BURST_PICK without mediaUrl forwards the metadata and the visible_tab frame");
+  checkBurstPickSuccess("background BURST_PICK without mediaUrl", bg, response, BURSTS_OK);
 }
 
 {
@@ -930,6 +977,7 @@ const MEDIA_URL = "https://r1---sn-abc.googlevideo.com/videoplayback?expire=123"
   const response = await bg.send({ type: "SAVE_PACKET" });
   check(response.ok === false && response.error === "active tab is not a http(s) page", "background rejects a non-http(s) tab");
   check(bg.fetched.length === 0, "background never calls the helper for a non-http(s) tab");
+  check(bg.pollStarts() === 0, "background starts no pending-history polling for a non-http(s) tab");
 }
 
 if (failures > 0) {
