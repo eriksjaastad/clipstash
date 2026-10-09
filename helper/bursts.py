@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .coerce import optional_float, packet_fields
 from .packets import new_packet_id, new_record, now_iso, write_packet
 
 SESSION_TTL_SECONDS = 45 * 60  # 45 minutes, within the 30-60 min brief window
@@ -98,14 +99,7 @@ def create_burst(
         "session_id": session_id,
         "created_at": now_iso(),
         "frame_count": len(frames),
-        "title": str(metadata.get("title") or ""),
-        "source_url": str(metadata.get("source_url") or ""),
-        "page_url": str(metadata.get("page_url") or metadata.get("source_url") or ""),
-        "site": str(metadata.get("site") or "generic"),
-        "timestamp_sec": _optional_float(metadata.get("timestamp_sec")),
-        "capture_method": str(metadata.get("capture_method") or "burst_canvas"),
-        "photoshop": _as_bool(metadata.get("photoshop")),
-        "name": str(metadata.get("name") or ""),
+        **packet_fields(metadata),
     }
     (directory / META_FILENAME).write_text(
         json.dumps(meta, indent=2), encoding="utf-8"
@@ -156,7 +150,7 @@ def choose_frame(
         source_url=source_url,
         page_url=str(metadata.get("page_url") or meta.get("page_url") or source_url),
         site=str(metadata.get("site") or meta.get("site") or "generic"),
-        timestamp_sec=_optional_float(
+        timestamp_sec=optional_float(
             metadata.get("timestamp_sec", meta.get("timestamp_sec"))
         ),
         capture_method=str(
@@ -170,20 +164,3 @@ def choose_frame(
     shutil.rmtree(directory, ignore_errors=True)
     return written
 
-
-def _optional_float(value: Any) -> float | None:
-    if value in (None, ""):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):  # governance: allow-silent SF002: timestamp_sec is optional packet metadata; a non-numeric value is recorded as absent (None), as is an empty one
-        return None
-
-
-def _as_bool(value: Any) -> bool:
-    """Accept JSON booleans and common string forms of truthiness."""
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return False
-    return str(value).strip().lower() in ("1", "true", "yes", "on")

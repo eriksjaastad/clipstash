@@ -109,13 +109,9 @@ import os
 import sys
 
 from . import __version__
+from .coerce import env_flag
 from .config import ConfigError, effective_packet_root
 from .packets import export_csv
-
-
-def _env_bool(name: str) -> bool:
-    # governance: allow-silent SF003: optional opt-in flag; unset/empty means off, which this returns as False
-    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -149,7 +145,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve_parser.add_argument(
         "--photoshop",
         action="store_true",
-        default=_env_bool("CLIPSTASH_PHOTOSHOP"),
+        default=env_flag("CLIPSTASH_PHOTOSHOP"),
         help="place every saved packet into Photoshop after write (macOS only; default $CLIPSTASH_PHOTOSHOP)",
     )
 

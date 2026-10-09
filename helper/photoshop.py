@@ -96,12 +96,13 @@ Save works but ``photoshop.method: "open"``
 
 from __future__ import annotations
 
-import os
 import shlex
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+
+from .coerce import env_flag
 
 PHOTOSHOP_BUNDLE_ID = "com.adobe.Photoshop"
 
@@ -203,13 +204,7 @@ def is_macos() -> bool:
 
 def env_photoshop_enabled() -> bool:
     """True when CLIPSTASH_PHOTOSHOP requests auto-place (1/true/yes/on)."""
-    # governance: allow-silent SF003: optional opt-in flag; unset/empty means Photoshop auto-place is off
-    return os.environ.get("CLIPSTASH_PHOTOSHOP", "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
+    return env_flag("CLIPSTASH_PHOTOSHOP")
 
 
 def build_place_script() -> str:
