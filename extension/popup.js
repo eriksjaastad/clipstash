@@ -4,7 +4,6 @@
 // carry the "Also place in Photoshop" checkbox flag), clipboard history list
 // with per-entry Title/URL/Both re-copy, and a link to the options page.
 
-const HELPER_BASE = "http://127.0.0.1:8787";
 const PHOTOSHOP_KEY = "clipstashPhotoshop";
 
 const $ = (id) => document.getElementById(id);
@@ -25,7 +24,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadPhotoshopPref();
 });
 
-function send(message) {
+async function send(message) {
   return chrome.runtime.sendMessage(message);
 }
 
@@ -51,10 +50,13 @@ async function refreshHealth() {
   text.textContent = "checking helper…";
   setup.hidden = true;
 
-  const health = await checkHealthDirect();
-  if (health && health.ok) {
+  // No response or a messaging error reads as a helper that isn't running.
+  // HEALTH answers { ok, helper, status }; `helper` is the /health body.
+  const response = await send({ type: "HEALTH" }).catch(() => null);
+  const helper = response && response.ok ? response.helper : null;
+  if (helper && helper.ok) {
     dot.className = "dot running";
-    text.textContent = `Helper running (v${health.version})`;
+    text.textContent = `Helper running (v${helper.version})`;
   } else {
     dot.className = "dot down";
     text.textContent = "Helper not running";
@@ -164,14 +166,4 @@ function actionButton(label, onClick) {
   button.textContent = label;
   button.addEventListener("click", onClick);
   return button;
-}
-
-// Unused for now; kept as the direct health-check path for the popup per spec.
-async function checkHealthDirect() {
-  try {
-    const response = await fetch(`${HELPER_BASE}/health`);
-    return response.json();
-  } catch (error) {
-    return { ok: false, error: String(error) };
-  }
 }

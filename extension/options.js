@@ -3,9 +3,7 @@
 // Views and edits the helper packet save root. Loads GET /config on open and
 // PUTs a new packet_root on submit; the helper persists it to
 // ~/Clipstash/config.json and applies it immediately. Talks to the local
-// helper directly (host_permissions cover 127.0.0.1:8787).
-
-const HELPER_BASE = "http://127.0.0.1:8787";
+// helper directly at ClipStashHelper.BASE (lib/helper-api.js).
 
 const currentRoot = document.getElementById("current-root");
 const defaultRoot = document.getElementById("default-root");
@@ -22,7 +20,7 @@ function setStatus(text, kind) {
 async function loadConfig() {
   setStatus("loading…", "");
   try {
-    const response = await fetch(`${HELPER_BASE}/config`);
+    const response = await fetch(`${ClipStashHelper.BASE}/config`);
     const payload = await response.json();
     if (!response.ok || !payload.ok) {
       setStatus(`helper error: ${payload.error || `HTTP ${response.status}`}`, "error");
@@ -34,7 +32,7 @@ async function loadConfig() {
     rootInput.value = payload.packet_root;
     setStatus("helper running", "ok");
   } catch (error) {
-    setStatus(`helper unreachable (${HELPER_BASE}): ${error}`, "error");
+    setStatus(`helper unreachable (${ClipStashHelper.BASE}): ${error}`, "error");
   }
 }
 
@@ -47,7 +45,7 @@ async function saveConfig(event) {
   }
   setStatus("saving…", "");
   try {
-    const response = await fetch(`${HELPER_BASE}/config`, {
+    const response = await fetch(`${ClipStashHelper.BASE}/config`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ packet_root: packetRoot }),
