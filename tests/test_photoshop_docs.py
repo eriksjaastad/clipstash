@@ -26,10 +26,12 @@ _NON_PHOTOSHOP_REASON_CODES = frozenset(
     }
 )
 
-#: ``"reason": "..."`` return-dict literals and ``reason = "..."`` assignments.
+#: ``"reason": "..."`` return-dict literals, ``reason = "..."`` assignments,
+#: and ``_fail("...", ...)`` calls.
 _REASON_LITERAL_RES = (
     re.compile(r'"reason"\s*:\s*"([a-z][a-z_]+)"'),
     re.compile(r'\breason\s*=\s*"([a-z][a-z_]+)"'),
+    re.compile(r'\b_fail\(\s*"([a-z][a-z_]+)"'),
 )
 
 _DOC_PHOTOSHOP_REASON_RE = re.compile(r"\bphotoshop_[a-z_]+")
