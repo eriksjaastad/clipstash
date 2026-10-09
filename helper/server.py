@@ -21,7 +21,7 @@ Binds 127.0.0.1 only. Endpoints:
   GET  /history/pending     -> drain pending burst-chosen history entries
 
 Both ``POST /packets`` and ``POST /bursts`` accept an optional ``crop_rect``
-request field (JSON object, or JSON string in multipart form data):
+request field (JSON object, or JSON string in a multipart ``POST /packets``):
 ``{x, y, width, height, dpr}`` in CSS viewport pixels. The extension sends it
 on tainted ``visible_tab`` / ``burst_visible_tab`` captures so the full-tab
 PNG can be cropped to the video element's on-screen rectangle before it is
@@ -59,6 +59,7 @@ from .bursts import (
     purge_expired_bursts,
     session_dir,
 )
+from .coerce import as_bool, optional_float, packet_fields
 from .config import (
     ConfigError,
     default_config_path,
@@ -95,15 +96,6 @@ def _decode_image_b64(value: str) -> bytes:
         raise ValueError(f"invalid image_base64: {exc}") from exc
 
 
-def _as_bool(value: Any) -> bool:
-    """Accept JSON booleans and common string forms of truthiness."""
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return False
-    return str(value).strip().lower() in ("1", "true", "yes", "on")
-
-
 def _parse_json_object(value: Any) -> dict[str, Any] | None:
     """Parse a multipart crop_rect field (JSON string) into a dict, or None."""
     if isinstance(value, dict):
@@ -117,80 +109,66 @@ def _parse_json_object(value: Any) -> dict[str, Any] | None:
     return parsed if isinstance(parsed, dict) else None
 
 
-def _record_from_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], bytes, bool]:
+def _packet_record(fields: dict[str, Any], *, form_data: bool) -> dict[str, Any]:
+    """Build the ``POST /packets`` record; new_record checks title/source_url and fills page_url.
+
+    Form-data values are text, so ``timestamp_sec`` and ``tags`` are parsed
+    from it; a JSON body stores them as sent.
+    """
     try:
-        record = new_record(
-            title=str(payload["title"]),
-            source_url=str(payload["source_url"]),
-            page_url=payload.get("page_url") or None,
-            site=str(payload.get("site") or "generic"),
-            timestamp_sec=payload.get("timestamp_sec"),
-            tags=payload.get("tags") or [],
-            notes=str(payload.get("notes") or ""),
-            capture_method=str(payload.get("capture_method") or "canvas"),
-            name=str(payload.get("name") or "") or None,
-        )
-    except KeyError as exc:
-        raise ValueError(f"missing field: {exc.args[0]}") from exc
-    image = _decode_image_b64(str(payload.get("image_base64") or ""))
-    image = apply_crop_rect(image, payload.get("crop_rect"))
-    return record, image, _as_bool(payload.get("photoshop"))
-
-
-def _parse_multipart(content_type: str, body: bytes) -> dict[str, Any]:
-    """Parse multipart/form-data into {field: str, files: {name: bytes}, file_list: [(name, filename, bytes)]}."""
-    raw = b"Content-Type: " + content_type.encode("utf-8") + b"\r\n\r\n" + body
-    message = BytesParser(policy=email_policy).parsebytes(raw)
-    fields: dict[str, Any] = {}
-    files: dict[str, bytes] = {}
-    file_list: list[tuple[str, str, bytes]] = []
-    for part in message.iter_parts():
-        name = part.get_param("name", header="content-disposition")
-        if not name:
-            continue
-        filename = part.get_filename()
-        payload = part.get_payload(decode=True) or b""
-        if filename:
-            files[name] = payload
-            file_list.append((name, filename, payload))
-        else:
-            charset = part.get_content_charset() or "utf-8"
-            fields[name] = payload.decode(charset, errors="replace")
-    return {"fields": fields, "files": files, "file_list": file_list}
-
-
-def _record_from_multipart(content_type: str, body: bytes) -> tuple[dict[str, Any], bytes, bool]:
-    parsed = _parse_multipart(content_type, body)
-    fields = parsed["fields"]
-    files = parsed["files"]
-    image = files.get("image") or files.get("still")
-    if image is None:
-        image = _decode_image_b64(str(fields.get("image_base64") or ""))
-    image = apply_crop_rect(image, _parse_json_object(fields.get("crop_rect")))
-    try:
-        record = new_record(
+        return new_record(
             title=str(fields["title"]),
             source_url=str(fields["source_url"]),
             page_url=fields.get("page_url") or None,
             site=str(fields.get("site") or "generic"),
-            timestamp_sec=_optional_float(fields.get("timestamp_sec")),
-            tags=json.loads(fields.get("tags") or "[]"),
+            timestamp_sec=(
+                optional_float(fields.get("timestamp_sec"))
+                if form_data
+                else fields.get("timestamp_sec")
+            ),
+            tags=json.loads(fields.get("tags") or "[]") if form_data else fields.get("tags") or [],
             notes=str(fields.get("notes") or ""),
             capture_method=str(fields.get("capture_method") or "canvas"),
             name=str(fields.get("name") or "") or None,
         )
     except KeyError as exc:
         raise ValueError(f"missing field: {exc.args[0]}") from exc
-    return record, image, _as_bool(fields.get("photoshop"))
 
 
-def _optional_float(value: str | None) -> float | None:
-    if value in (None, ""):
-        return None
-    try:
-        return float(value)
-    except ValueError:  # governance: allow-silent SF002: timestamp_sec is optional packet metadata; a non-numeric value is recorded as absent (None), as is an empty one
-        return None
+def _record_from_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], bytes, bool]:
+    record = _packet_record(payload, form_data=False)
+    image = _decode_image_b64(str(payload.get("image_base64") or ""))
+    image = apply_crop_rect(image, payload.get("crop_rect"))
+    return record, image, as_bool(payload.get("photoshop"))
+
+
+def _parse_multipart(content_type: str, body: bytes) -> tuple[dict[str, str], dict[str, bytes]]:
+    """Parse multipart/form-data into ({field: text}, {name: file bytes})."""
+    raw = b"Content-Type: " + content_type.encode("utf-8") + b"\r\n\r\n" + body
+    message = BytesParser(policy=email_policy).parsebytes(raw)
+    fields: dict[str, str] = {}
+    files: dict[str, bytes] = {}
+    for part in message.iter_parts():
+        name = part.get_param("name", header="content-disposition")
+        if not name:
+            continue
+        payload = part.get_payload(decode=True) or b""
+        if part.get_filename():
+            files[name] = payload
+        else:
+            charset = part.get_content_charset() or "utf-8"
+            fields[name] = payload.decode(charset, errors="replace")
+    return fields, files
+
+
+def _record_from_multipart(
+    fields: dict[str, str], files: dict[str, bytes]
+) -> tuple[dict[str, Any], bytes, bool]:
+    image = files.get("image") or files.get("still")
+    if image is None:
+        image = _decode_image_b64(str(fields.get("image_base64") or ""))
+    image = apply_crop_rect(image, _parse_json_object(fields.get("crop_rect")))
+    return _packet_record(fields, form_data=True), image, as_bool(fields.get("photoshop"))
 
 
 def _history_entry_from_record(record: dict[str, Any]) -> dict[str, Any]:
@@ -216,19 +194,6 @@ def _history_entry_from_record(record: dict[str, Any]) -> dict[str, Any]:
 # -- burst sessions -----------------------------------------------------------
 
 
-def _burst_metadata_from_fields(fields: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "title": str(fields.get("title") or ""),
-        "source_url": str(fields.get("source_url") or ""),
-        "page_url": str(fields.get("page_url") or fields.get("source_url") or ""),
-        "site": str(fields.get("site") or "generic"),
-        "timestamp_sec": _optional_float(fields.get("timestamp_sec")),
-        "capture_method": str(fields.get("capture_method") or "burst_canvas"),
-        "photoshop": _as_bool(fields.get("photoshop")),
-        "name": str(fields.get("name") or ""),
-    }
-
-
 def _burst_from_payload(payload: dict[str, Any]) -> tuple[list[bytes], dict[str, Any]]:
     raw_frames = payload.get("frames")
     if not isinstance(raw_frames, list) or not raw_frames:
@@ -237,37 +202,7 @@ def _burst_from_payload(payload: dict[str, Any]) -> tuple[list[bytes], dict[str,
     frames = [
         apply_crop_rect(_decode_image_b64(str(frame)), crop_rect) for frame in raw_frames
     ]
-    metadata = _burst_metadata_from_fields(payload)
-    metadata["photoshop"] = _as_bool(payload.get("photoshop"))
-    return frames, metadata
-
-
-def _frame_sort_key(indexed: tuple[int, tuple[str, str, bytes]]) -> tuple[int, int, int]:
-    position, (name, _filename, _payload) = indexed
-    match = re.fullmatch(r"frame_?(\d*)", name)
-    if match and match.group(1).isdigit():
-        return (0, int(match.group(1)), position)
-    if name in ("frames", "frame"):
-        return (1, position, position)
-    return (2, position, position)
-
-
-def _burst_from_multipart(content_type: str, body: bytes) -> tuple[list[bytes], dict[str, Any]]:
-    parsed = _parse_multipart(content_type, body)
-    file_list = [
-        (name, filename, payload)
-        for name, filename, payload in parsed["file_list"]
-        if name not in ("image", "still")
-    ]
-    if not file_list:
-        raise ValueError("burst requires at least one frame file")
-    ordered = sorted(enumerate(file_list), key=_frame_sort_key)
-    crop_rect = _parse_json_object(parsed["fields"].get("crop_rect"))
-    frames = [
-        apply_crop_rect(payload, crop_rect)
-        for _position, (_name, _filename, payload) in ordered
-    ]
-    return frames, _burst_metadata_from_fields(parsed["fields"])
+    return frames, packet_fields(payload, strict_timestamp=True)
 
 
 def _json_for_script(value: Any) -> str:
@@ -288,17 +223,10 @@ def _picker_html(session_id: str, meta: dict[str, Any]) -> str:
         f"</button>"
         for index in range(frame_count)
     )
-    meta_json = _json_for_script(
-        {
-            "title": meta.get("title") or "",
-            "source_url": meta.get("source_url") or "",
-            "page_url": meta.get("page_url") or meta.get("source_url") or "",
-            "site": meta.get("site") or "generic",
-            "timestamp_sec": meta.get("timestamp_sec"),
-            "capture_method": meta.get("capture_method") or "burst_canvas",
-            "name": meta.get("name") or "",
-        }
-    )
+    # META is posted back to choose; the photoshop flag stays in the session.
+    fields = packet_fields(meta)
+    del fields["photoshop"]
+    meta_json = _json_for_script(fields)
     meta_text = html.escape(
         json.dumps(
             {
@@ -393,6 +321,10 @@ def _picker_html(session_id: str, meta: dict[str, Any]) -> str:
 """
 
 
+class _UnsupportedContentType(Exception):
+    """The request body is neither JSON nor a form the route accepts (415)."""
+
+
 class ClipStashHandler(BaseHTTPRequestHandler):
     server_version = "clipstashd/" + __version__
     root: str | None = None
@@ -400,6 +332,43 @@ class ClipStashHandler(BaseHTTPRequestHandler):
     photoshop_auto: bool = False
     pending_history: list[dict[str, Any]] = []
     pending_history_lock: threading.Lock = threading.Lock()
+    body: bytes = b""
+
+    # (method, path regex for re.fullmatch, handler name); groups are the handler's arguments.
+    ROUTES = (
+        ("GET", r"/health", "_serve_health"),
+        ("GET", r"/config", "_serve_config"),
+        ("GET", r"/packets", "_serve_packets"),
+        ("GET", r"/export\.csv", "_serve_export"),
+        ("GET", r"/history/pending", "_serve_pending_history"),
+        ("GET", r"/picker/([^/]+)", "_serve_picker"),
+        ("GET", r"/picker/([^/]+)/frame/(\d+)", "_serve_frame"),
+        ("POST", r"/packets", "_create_packet"),
+        ("POST", r"/bursts", "_create_burst_session"),
+        ("POST", r"/bursts/ffmpeg", "_create_ffmpeg_burst_session"),
+        ("POST", r"/packets/([^/]+)/place-photoshop", "_place_packet_in_photoshop"),
+        ("POST", r"/picker/([^/]+)/choose", "_choose_burst_frame"),
+        ("PUT", r"/config", "_update_config"),
+    )
+
+    # Per method, first match wins; the body is {"ok": false, "error": str(exc)}.
+    # POST and PUT answer any other error with "internal error: ..." 500; GET
+    # has no last-resort guard, so other GET errors still drop the connection.
+    ERROR_STATUS = {
+        "GET": ((FileNotFoundError, 404),),
+        "POST": (
+            (_UnsupportedContentType, 415),
+            (ValueError, 400),
+            (FileNotFoundError, 404),
+            (FFmpegBurstError, 502),
+        ),
+        "PUT": (
+            # An unusable config.json (a ValueError) is not the request's fault.
+            (ConfigError, 500),
+            (ValueError, 400),
+            (OSError, 400),
+        ),
+    }
 
     # -- plumbing ---------------------------------------------------------
     def _send(self, status: int, body: bytes, content_type: str) -> None:
@@ -422,6 +391,39 @@ class ClipStashHandler(BaseHTTPRequestHandler):
             return b""
         return self.rfile.read(length)
 
+    def _json_body(self) -> Any:
+        return json.loads(self.body.decode("utf-8") or "{}")
+
+    def _read_payload(self, *, multipart: bool) -> tuple[Any, dict[str, bytes] | None]:
+        """Decode the body as JSON -> (payload, None), or, where the route takes
+        it, multipart/form-data -> (fields, files). Anything else is a 415."""
+        content_type = self.headers.get("Content-Type") or ""
+        if multipart and content_type.startswith("multipart/form-data"):
+            return _parse_multipart(content_type, self.body)
+        if content_type.startswith(JSON):
+            return self._json_body(), None
+        raise _UnsupportedContentType("expected JSON or multipart/form-data")
+
+    def _dispatch(self, method: str) -> None:
+        path = urlparse(self.path).path
+        if method != "GET":
+            self.body = self._read_body()
+        try:
+            for route_method, pattern, handler in self.ROUTES:
+                match = re.fullmatch(pattern, path) if route_method == method else None
+                if match:
+                    getattr(self, handler)(*match.groups())
+                    return
+            self._send_json({"ok": False, "error": "not found"}, 404)
+        except Exception as exc:  # governance: allow-silent SF002: not silent; every caught error is answered with its mapped status (or 500) and its message, and GET re-raises what it does not map
+            for error_class, status in self.ERROR_STATUS[method]:
+                if isinstance(exc, error_class):
+                    self._send_json({"ok": False, "error": str(exc)}, status)
+                    return
+            if method == "GET":
+                raise
+            self._send_json({"ok": False, "error": f"internal error: {exc}"}, 500)
+
     def _enqueue_pending_history(self, entry: dict[str, Any]) -> None:
         with self.pending_history_lock:
             self.pending_history.append(entry)
@@ -437,82 +439,24 @@ class ClipStashHandler(BaseHTTPRequestHandler):
         self._send(204, b"", "text/plain")
 
     def do_GET(self):  # noqa: N802
-        path = urlparse(self.path).path
-        try:
-            if path == "/health":
-                self._send_json({"ok": True, "version": __version__})
-            elif path == "/config":
-                self._serve_config()
-            elif path == "/packets":
-                self._send_json({"ok": True, "packets": list_packets(self.root)})
-            elif path == "/export.csv":
-                self._send(200, export_csv(self.root).encode("utf-8"), "text/csv")
-            elif path == "/history/pending":
-                self._serve_pending_history()
-            else:
-                match = re.fullmatch(r"/picker/([^/]+)", path)
-                if match:
-                    self._serve_picker(match.group(1))
-                    return
-                match = re.fullmatch(r"/picker/([^/]+)/frame/(\d+)", path)
-                if match:
-                    self._serve_frame(match.group(1), int(match.group(2)))
-                    return
-                self._send_json({"ok": False, "error": "not found"}, 404)
-        except FileNotFoundError as exc:
-            self._send_json({"ok": False, "error": str(exc)}, 404)
+        self._dispatch("GET")
 
     def do_POST(self):  # noqa: N802
-        path = urlparse(self.path).path
-        content_type = self.headers.get("Content-Type") or ""
-        body = self._read_body()
-        try:
-            if path == "/packets":
-                self._create_packet(content_type, body)
-                return
-            if path == "/bursts":
-                self._create_burst_session(content_type, body)
-                return
-            if path == "/bursts/ffmpeg":
-                self._create_ffmpeg_burst_session(body)
-                return
-            match = re.fullmatch(r"/packets/([^/]+)/place-photoshop", path)
-            if match:
-                self._place_packet_in_photoshop(match.group(1))
-                return
-            match = re.fullmatch(r"/picker/([^/]+)/choose", path)
-            if match:
-                self._choose_burst_frame(match.group(1), body)
-                return
-            self._send_json({"ok": False, "error": "not found"}, 404)
-        except (ValueError, json.JSONDecodeError) as exc:
-            self._send_json({"ok": False, "error": str(exc)}, 400)
-        except FileNotFoundError as exc:
-            self._send_json({"ok": False, "error": str(exc)}, 404)
-        except FFmpegBurstError as exc:
-            self._send_json({"ok": False, "error": str(exc)}, 502)
-        except Exception as exc:  # pragma: no cover - last-resort guard
-            self._send_json({"ok": False, "error": f"internal error: {exc}"}, 500)
+        self._dispatch("POST")
 
     def do_PUT(self):  # noqa: N802
-        path = urlparse(self.path).path
-        body = self._read_body()
-        try:
-            if path == "/config":
-                self._update_config(body)
-                return
-            self._send_json({"ok": False, "error": "not found"}, 404)
-        except ConfigError as exc:
-            # The on-disk config.json is unusable; not the request's fault.
-            self._send_json({"ok": False, "error": str(exc)}, 500)
-        except (ValueError, json.JSONDecodeError) as exc:
-            self._send_json({"ok": False, "error": str(exc)}, 400)
-        except OSError as exc:
-            self._send_json({"ok": False, "error": str(exc)}, 400)
-        except Exception as exc:  # pragma: no cover - last-resort guard
-            self._send_json({"ok": False, "error": f"internal error: {exc}"}, 500)
+        self._dispatch("PUT")
 
     # -- action handlers ---------------------------------------------------
+    def _serve_health(self) -> None:
+        self._send_json({"ok": True, "version": __version__})
+
+    def _serve_packets(self) -> None:
+        self._send_json({"ok": True, "packets": list_packets(self.root)})
+
+    def _serve_export(self) -> None:
+        self._send(200, export_csv(self.root).encode("utf-8"), "text/csv")
+
     def _config_payload(self) -> dict[str, Any]:
         return {
             "ok": True,
@@ -524,8 +468,8 @@ class ClipStashHandler(BaseHTTPRequestHandler):
     def _serve_config(self) -> None:
         self._send_json(self._config_payload())
 
-    def _update_config(self, body: bytes) -> None:
-        payload = json.loads(body.decode("utf-8") or "{}")
+    def _update_config(self) -> None:
+        payload = self._json_body()
         if not isinstance(payload, dict):
             raise ValueError("expected a JSON object")
         path = normalize_packet_root(payload.get("packet_root"))
@@ -541,19 +485,14 @@ class ClipStashHandler(BaseHTTPRequestHandler):
         self._send_json(self._config_payload())
 
     def _photoshop_requested(self, explicit: Any) -> bool:
-        return _as_bool(explicit) or self.photoshop_auto or env_photoshop_enabled()
+        return as_bool(explicit) or self.photoshop_auto or env_photoshop_enabled()
 
-    def _create_packet(self, content_type: str, body: bytes) -> None:
-        if content_type.startswith("multipart/form-data"):
-            record, image, photoshop = _record_from_multipart(content_type, body)
-        elif content_type.startswith(JSON):
-            payload = json.loads(body.decode("utf-8") or "{}")
+    def _create_packet(self) -> None:
+        payload, files = self._read_payload(multipart=True)
+        if files is None:
             record, image, photoshop = _record_from_payload(payload)
         else:
-            self._send_json(
-                {"ok": False, "error": "expected JSON or multipart/form-data"}, 415
-            )
-            return
+            record, image, photoshop = _record_from_multipart(payload, files)
         written = write_packet(record, image, root=self.root)
         response: dict[str, Any] = {"ok": True, "packet": written}
         if self._photoshop_requested(photoshop):
@@ -562,30 +501,12 @@ class ClipStashHandler(BaseHTTPRequestHandler):
             )
         self._send_json(response, 201)
 
-    def _create_burst_session(self, content_type: str, body: bytes) -> None:
-        if content_type.startswith("multipart/form-data"):
-            frames, metadata = _burst_from_multipart(content_type, body)
-        elif content_type.startswith(JSON):
-            payload = json.loads(body.decode("utf-8") or "{}")
-            frames, metadata = _burst_from_payload(payload)
-        else:
-            self._send_json(
-                {"ok": False, "error": "expected JSON or multipart/form-data"}, 415
-            )
-            return
-        meta = create_burst(frames, metadata)
-        session_id = str(meta["session_id"])
-        self._send_json(
-            {
-                "ok": True,
-                "session_id": session_id,
-                "picker_url": self._picker_url(session_id),
-                "frame_count": int(meta.get("frame_count") or 0),
-            },
-            201,
-        )
+    def _create_burst_session(self) -> None:
+        payload, _ = self._read_payload(multipart=False)
+        frames, metadata = _burst_from_payload(payload)
+        self._send_burst_created(create_burst(frames, metadata))
 
-    def _create_ffmpeg_burst_session(self, body: bytes) -> None:
+    def _create_ffmpeg_burst_session(self) -> None:
         """Create a native multi-frame burst from a media URL (JSON only).
 
         The extension calls this when its in-page canvas burst is tainted and
@@ -593,7 +514,7 @@ class ClipStashHandler(BaseHTTPRequestHandler):
         otherwise responds 503 so the extension falls back to its single
         visible-tab still (``burst_visible_tab``).
         """
-        payload = json.loads(body.decode("utf-8") or "{}")
+        payload = self._json_body()
         if not isinstance(payload, dict):
             raise ValueError("expected a JSON object")
         media_url = str(payload.get("media_url") or "").strip()
@@ -611,17 +532,12 @@ class ClipStashHandler(BaseHTTPRequestHandler):
             site=str(payload.get("site") or "generic"),
             page_url=payload.get("page_url") or None,
         )
-        metadata = {
-            "title": str(payload.get("title") or ""),
-            "source_url": str(payload.get("source_url") or ""),
-            "page_url": str(payload.get("page_url") or payload.get("source_url") or ""),
-            "site": str(payload.get("site") or "generic"),
-            "timestamp_sec": _optional_float(payload.get("timestamp_sec")),
-            "capture_method": "burst_ffmpeg",
-            "photoshop": _as_bool(payload.get("photoshop")),
-            "name": str(payload.get("name") or ""),
-        }
+        metadata = packet_fields(payload, strict_timestamp=True)
+        metadata["capture_method"] = "burst_ffmpeg"
         meta = create_burst(frames, metadata)
+        self._send_burst_created(meta, capture_method="burst_ffmpeg")
+
+    def _send_burst_created(self, meta: dict[str, Any], **extra: Any) -> None:
         session_id = str(meta["session_id"])
         self._send_json(
             {
@@ -629,7 +545,7 @@ class ClipStashHandler(BaseHTTPRequestHandler):
                 "session_id": session_id,
                 "picker_url": self._picker_url(session_id),
                 "frame_count": int(meta.get("frame_count") or 0),
-                "capture_method": "burst_ffmpeg",
+                **extra,
             },
             201,
         )
@@ -640,27 +556,28 @@ class ClipStashHandler(BaseHTTPRequestHandler):
         html = _picker_html(session_id, meta).encode("utf-8")
         self._send(200, html, "text/html; charset=utf-8")
 
-    def _serve_frame(self, session_id: str, index: int) -> None:
+    def _serve_frame(self, session_id: str, index: str) -> None:
         meta = load_session(session_id)
         frame_count = int(meta.get("frame_count") or 0)
-        if index < 0 or index >= frame_count:
+        frame_index = int(index)
+        if frame_index < 0 or frame_index >= frame_count:
             self._send_json({"ok": False, "error": "frame not found"}, 404)
             return
-        path = session_dir(session_id) / frame_filename(index)
+        path = session_dir(session_id) / frame_filename(frame_index)
         if not path.exists():
             self._send_json({"ok": False, "error": "frame not found"}, 404)
             return
         self._send(200, path.read_bytes(), "image/png")
 
-    def _choose_burst_frame(self, session_id: str, body: bytes) -> None:
-        payload = json.loads(body.decode("utf-8") or "{}")
+    def _choose_burst_frame(self, session_id: str) -> None:
+        payload = self._json_body()
         try:
             frame_index = int(payload.get("frame_index"))
         except (TypeError, ValueError) as exc:
             raise ValueError("frame_index is required") from exc
         meta = load_session(session_id)
         photoshop = self._photoshop_requested(
-            _as_bool(payload.get("photoshop")) or _as_bool(meta.get("photoshop"))
+            as_bool(payload.get("photoshop")) or as_bool(meta.get("photoshop"))
         )
         record = choose_frame(session_id, frame_index, payload, root=self.root)
         self._enqueue_pending_history(_history_entry_from_record(record))
@@ -706,6 +623,7 @@ def create_server(
 ) -> ThreadingHTTPServer:
     """Build a server bound to host (must stay loopback-only in normal use)."""
     config_path_obj = Path(config_path) if config_path else default_config_path()
+    # A given root is returned as-is without reading config, so cli.main's already-resolved root costs no second read.
     effective_root = effective_packet_root(root, config_path=config_path_obj)
     handler = type(
         "BoundClipStashHandler",
@@ -728,19 +646,19 @@ def run_server(
     photoshop_auto: bool = False,
     config_path: str | Path | None = None,
 ) -> None:
+    """Serve until interrupted; create_server resolves ``root`` (cli.main passes it resolved)."""
     if host not in ("127.0.0.1", "localhost", "::1"):
         raise ValueError("clipstashd refuses to bind to non-loopback interfaces")
-    config_path_obj = Path(config_path) if config_path else default_config_path()
-    effective_root = effective_packet_root(root, config_path=config_path_obj)
     server = create_server(
         host=host,
         port=port,
         root=root,
         photoshop_auto=photoshop_auto,
-        config_path=config_path_obj,
+        config_path=config_path,
     )
     actual = server.server_address[1]
-    print(f"clipstashd {__version__} listening on http://{host}:{actual} (root: {effective_root})")
+    root_shown = server.RequestHandlerClass.root
+    print(f"clipstashd {__version__} listening on http://{host}:{actual} (root: {root_shown})")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

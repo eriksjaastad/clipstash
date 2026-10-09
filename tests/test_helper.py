@@ -815,13 +815,13 @@ def test_burst_visible_tab_crop_rect_crops_frame_and_chosen_packet(server, tmp_p
     assert read_record(packet["id"], root=tmp_path)["capture_method"] == "burst_visible_tab"
 
 
-def test_burst_multipart_one_frame_file_201(server):
+def test_burst_multipart_415_creates_no_session(server):
+    before = set(session_dir("x").parent.glob("*"))
     status, _, body = post_multipart_packet(
         server, path="/bursts", part="frame_0", title="T", source_url="https://example.com/1"
     )
-    assert status == 201
-    payload = json.loads(body)
-    assert payload["session_id"] and payload["frame_count"] == 1
+    assert (status, json.loads(body)) == (415, {"ok": False, "error": "expected JSON or multipart/form-data"})
+    assert set(session_dir("x").parent.glob("*")) == before
 
 
 def test_burst_requires_frames(server):
