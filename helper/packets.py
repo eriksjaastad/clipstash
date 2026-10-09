@@ -267,7 +267,11 @@ def packet_image_path(
 
 
 def summarize(record: dict[str, Any]) -> dict[str, Any]:
-    return {field: record.get(field) for field in SUMMARY_FIELDS}
+    # ``id`` is required (KeyError when missing); the other fields default to None.
+    return {
+        field: record[field] if field == "id" else record.get(field)
+        for field in SUMMARY_FIELDS
+    }
 
 
 def list_packets(root: str | Path | None = None) -> list[dict[str, Any]]:
