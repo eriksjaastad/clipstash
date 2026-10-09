@@ -54,15 +54,23 @@ error naming the file and exits 1 instead of saving somewhere else.
 
 Setup
 -----
-Install on macOS with Homebrew (packaging/homebrew/README.md) or as a single
-binary (scripts/build_macos_binary.sh, then scripts/install_macos_helper.sh).
-README.md covers both and loading the extension. Developer path (macOS 12+,
-Python 3.11+):
+Install on macOS either way (packaging/homebrew/README.md has the brew command):
+
+  Homebrew       packaging/homebrew/clipstash.rb installs clipstashd on PATH.
+  Single binary  scripts/build_macos_binary.sh builds dist/clipstashd, then
+                 scripts/install_macos_helper.sh installs it to
+                 ~/bin/clipstashd and loads the LaunchAgent.
+
+Developer path (macOS 12+, Python 3.11+):
 
   python3 -m venv .venv && source .venv/bin/activate
   pip install -e .        # or: uv sync  (then prefix commands with `uv run`)
-  clipstashd              # or: python -m helper, or ./scripts/dev_up.sh
+  clipstashd              # default command: serve
+  python -m helper        # same, no install needed
+  ./scripts/dev_up.sh     # one-command dev env: venv + deps + serve
   curl http://127.0.0.1:8787/health
+
+Extension: chrome://extensions → Developer mode → Load unpacked → extension/.
 
 Native burst (cross-origin video)
 ---------------------------------

@@ -96,10 +96,16 @@ def test_burst_frames_from_url_file_url_returns_pngs_and_cleans_temp(
 def test_missing_ffmpeg_raises_clear_error(monkeypatch) -> None:
     monkeypatch.setattr(ffmpeg_burst.shutil, "which", lambda _name: None)
     assert ffmpeg_available() is False
-    with pytest.raises(FFmpegBurstError, match="ffmpeg not found"):
+    with pytest.raises(FFmpegBurstError) as exc:
         extract_burst_pngs(FIXTURE, 1.0)
+    assert (type(exc.value), str(exc.value)) == (
+        FFmpegBurstError, "ffmpeg not found on PATH (brew install ffmpeg)"
+    )
     with pytest.raises(FFmpegBurstError, match="ffmpeg not found"):
         burst_frames_from_url(FIXTURE.as_uri(), 1.0)
+    # Direct callers download first, so a bad URL fails before the ffmpeg check.
+    with pytest.raises(FFmpegBurstError, match="download failed"):
+        burst_frames_from_url("http://127.0.0.1:1/nope.mp4", 1.0)
 
 
 def test_unsupported_scheme_raises_clear_error() -> None:

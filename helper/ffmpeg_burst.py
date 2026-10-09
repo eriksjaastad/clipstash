@@ -21,11 +21,13 @@ Public API
     True when an ``ffmpeg`` binary is on PATH.
 ``ytdlp_available()``
     True when a ``yt-dlp`` binary is on PATH.
-``extract_burst_pngs(media_path, timestamp_sec, *, step, n)``
+``ffmpeg_path()``
+    The ``ffmpeg`` binary on PATH, or None.
+``extract_burst_pngs(media_path, timestamp_sec, *, step, n, ffmpeg)``
     Run ffmpeg once per seek position and return PNG bytes.
 ``fetch_media_to_temp(media_url, *, site, page_url)``
     Download / copy media to a fresh temp file; caller must clean up.
-``burst_frames_from_url(media_url, timestamp_sec, *, site, page_url)``
+``burst_frames_from_url(media_url, timestamp_sec, *, site, page_url, ffmpeg)``
     fetch → extract → cleanup, returning the PNG frame list.
 
 ``fetch_media_to_temp`` also accepts ``file://`` URLs (copies the local file
@@ -55,25 +57,22 @@ class FFmpegBurstError(Exception):
     """Raised when a native ffmpeg burst cannot be produced."""
 
 
-class FFmpegMissingError(FFmpegBurstError):
-    """ffmpeg is not on PATH (the server answers 503 rather than 502)."""
+FFMPEG_MISSING = "ffmpeg not found on PATH (brew install ffmpeg)"
+
+
+def ffmpeg_path() -> str | None:
+    """The ``ffmpeg`` binary on PATH, or None."""
+    return shutil.which("ffmpeg")
 
 
 def ffmpeg_available() -> bool:
     """True when an ``ffmpeg`` binary is on PATH."""
-    return shutil.which("ffmpeg") is not None
+    return ffmpeg_path() is not None
 
 
 def ytdlp_available() -> bool:
     """True when a ``yt-dlp`` binary is on PATH."""
     return shutil.which("yt-dlp") is not None
-
-
-def _ffmpeg_path() -> str:
-    path = shutil.which("ffmpeg")
-    if not path:
-        raise FFmpegMissingError("ffmpeg not found on PATH (brew install ffmpeg)")
-    return path
 
 
 def _run_tool(command: list[str], timeout: int, timed_out: str, failed: str) -> None:
@@ -131,11 +130,13 @@ def extract_burst_pngs(
 
     Runs one ffmpeg invocation per seek position (``-ss`` before ``-i``, one
     video frame, PNG output) inside a private temp dir that is always
-    removed. *ffmpeg* is the binary path when the caller already resolved it.
+    removed. *ffmpeg* is the binary path if the caller already looked it up.
     Raises :class:`FFmpegBurstError` when ffmpeg is missing, times out, or
     produces no frame.
     """
-    ffmpeg = ffmpeg or _ffmpeg_path()
+    ffmpeg = ffmpeg or ffmpeg_path()
+    if not ffmpeg:
+        raise FFmpegBurstError(FFMPEG_MISSING)
     media = Path(media_path)
     if not media.is_file():
         raise FFmpegBurstError(f"media file not found: {media}")
@@ -298,13 +299,9 @@ def burst_frames_from_url(
     *,
     site: str = "generic",
     page_url: str | None = None,
+    ffmpeg: str | None = None,
 ) -> list[bytes]:
-    """fetch → extract → cleanup temp download → return PNG list (len >= 1).
-
-    ffmpeg is looked up once, before any download, so a missing ffmpeg
-    raises :class:`FFmpegMissingError` without fetching anything.
-    """
-    ffmpeg = _ffmpeg_path()
+    """fetch → extract → cleanup temp download → return PNG list (len >= 1)."""
     media_path = fetch_media_to_temp(media_url, site=site, page_url=page_url)
     tmpdir = media_path.parent
     try:

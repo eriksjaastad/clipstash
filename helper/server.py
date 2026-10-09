@@ -70,7 +70,7 @@ from .config import (
     save_config,
 )
 from .crop import apply_crop_rect
-from .ffmpeg_burst import FFmpegBurstError, FFmpegMissingError, burst_frames_from_url
+from .ffmpeg_burst import FFMPEG_MISSING, FFmpegBurstError, burst_frames_from_url, ffmpeg_path
 from .packets import (
     export_csv,
     list_packets,
@@ -360,7 +360,6 @@ class ClipStashHandler(BaseHTTPRequestHandler):
             (_UnsupportedContentType, 415),
             (ValueError, 400),
             (FileNotFoundError, 404),
-            (FFmpegMissingError, 503),
             (FFmpegBurstError, 502),
         ),
         "PUT": (
@@ -521,11 +520,16 @@ class ClipStashHandler(BaseHTTPRequestHandler):
         media_url = str(payload.get("media_url") or "").strip()
         if not media_url:
             raise ValueError("media_url is required")
+        ffmpeg = ffmpeg_path()
+        if not ffmpeg:
+            self._send_json({"ok": False, "error": FFMPEG_MISSING}, 503)
+            return
         frames = burst_frames_from_url(
             media_url,
             payload.get("timestamp_sec"),
             site=str(payload.get("site") or "generic"),
             page_url=payload.get("page_url") or None,
+            ffmpeg=ffmpeg,
         )
         metadata = packet_fields(payload, strict_timestamp=True)
         metadata["capture_method"] = "burst_ffmpeg"
