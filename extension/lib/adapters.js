@@ -1,6 +1,6 @@
 // Site adapters for clipstash.
 //
-// Interface (PLAN.md §4):
+// Interface:
 //   {
 //     id: string,
 //     matches(url: string): boolean,

@@ -178,7 +178,7 @@ async function extractFor(url, doc) {
   check(info.sourceUrl === "https://example.com/watch?v=1", "generic source_url is page URL");
 }
 
-// -- urls.js: canonicalizeVideoUrl + isGreenCheckSite (#7691) -----------------
+// -- urls.js: canonicalizeVideoUrl + isGreenCheckSite -------------------------
 
 {
   const sandbox = makeContext("https://www.youtube.com/watch?v=dQw4w9WgXcQ", makeDocument({}));

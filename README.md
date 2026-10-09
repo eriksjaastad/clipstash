@@ -8,13 +8,15 @@ Chrome-first tool that captures a still from a page video (YouTube, X/Twitter, I
 
 ## Status
 
-See [PLAN.md](./PLAN.md); known gaps in [ISSUES.md](./ISSUES.md). Story of the extract: [CASESTUDY.md](./CASESTUDY.md).
+Known gaps and limits: [ISSUES.md](./ISSUES.md). Story of the extract: [CASESTUDY.md](./CASESTUDY.md).
 
 ## Layout
 
 ```
 helper/              Python helper (clipstashd): packet schema + local HTTP API
 extension/           Chrome MV3 extension: adapters, capture, clipboard history
+scripts/             Dev env, macOS binary build/install, demo packet, extension smoke test
+packaging/           Homebrew formula and macOS LaunchAgent template
 examples/packets/    Synthetic demo packet (no real client data)
 tests/               pytest for the helper
 ```
@@ -48,15 +50,23 @@ Stranger install (macOS): Homebrew formula (`packaging/homebrew/README.md`) or s
 
 Packets default to `~/Clipstash/packets/<site>/<id>/<slug>.png` + `record.yaml`, where `<site>` is the adapter id (`youtube`, `tiktok`, `instagram`, `x`, `generic`) and `<slug>` comes from the video title (or the popup's optional **Still name** field). Change the root from the extension **Options** page (writes `~/Clipstash/config.json`) or with `--root` / `CLIPSTASH_ROOT`; the resolution order lives in `helper/config.py` and `clipstashd --help`.
 
+## Design notes
+
+- **Why a local helper.** Writing packets to disk, hosting the burst picker and running ffmpeg for native-resolution bursts need a real process, so the extension is never the only place frames live.
+- **Loopback only, no auth.** clipstashd binds 127.0.0.1 and refuses other interfaces. Any process on your machine can call it; there is no token in v1.
+- **`record.yaml` is the source of truth.** The CSV export and `GET /packets` summaries are derived from it.
+- **macOS first.** The helper, install scripts and Photoshop mode target macOS; Windows/Linux helper parity is out of v1.
+- **Also out of v1:** a Chrome Web Store listing (load unpacked instead), quality/style scoring of stills, catalogue numbering and review dashboards.
+
 ## Documentation
 
-What a piece of code **does** is documented next to that code and tested against it; why/how we work stays in markdown (PLAN.md, ISSUES.md). `clipstashd --help` is generated from `helper/cli.py`'s module docstring, `helper/photoshop.py` and `helper/config.py` carry their behaviour in their module docstrings, and drift-guard tests (`tests/test_cli_docs.py`, `tests/test_photoshop_docs.py`, `tests/test_config_docs.py`) fail when docs and code disagree. This README is pointers, not a second `--help`.
+What a piece of code **does** is documented next to that code and tested against it; known gaps stay in markdown (ISSUES.md). The packet schema and on-disk layout live in the `helper/packets.py` module docstring, and the site adapter interface in the `extension/lib/adapters.js` header. `clipstashd --help` is generated from `helper/cli.py`'s module docstring, `helper/photoshop.py` and `helper/config.py` carry their behaviour in their module docstrings, and drift-guard tests (`tests/test_cli_docs.py`, `tests/test_photoshop_docs.py`, `tests/test_config_docs.py`) fail when docs and code disagree. This README is pointers, not a second `--help`.
 
 ## Tests
 
 ```bash
 .venv/bin/pytest -q                 # helper: packet schema, storage, HTTP API
-node scripts/smoke_extension.mjs    # extension JS: adapters + taint fallback (no browser)
+node scripts/smoke_extension.mjs    # extension JS: adapters, capture fallbacks, overlay (no browser)
 ```
 
 ## License

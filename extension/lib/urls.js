@@ -1,7 +1,7 @@
 // clipstash URL canonicalization shared by the capture adapters, the service
 // worker captured-URL index, and the green-check overlay.
 //
-// Matching rule (#7691): canonicalize BOTH the grid href AND each packet's
+// Matching rule: canonicalize BOTH the grid href AND each packet's
 // source_url + page_url before set membership, so remakes of the same video
 // share one canonical key.
 //

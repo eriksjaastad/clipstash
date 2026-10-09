@@ -3,7 +3,7 @@
 // Message hub for the popup/picker and owner of the clipboard history in
 // chrome.storage.local. Handles HEALTH, SAVE_PACKET (single frame capture),
 // BURST_PICK (burst capture + helper picker), APPEND_HISTORY, GET_HISTORY and
-// GET_CAPTURED_URLS (the canonicalized packet URL set used by the #7691
+// GET_CAPTURED_URLS (the canonicalized packet URL set used by the
 // green-check overlay). Talks to the local helper through lib/helper-api.js.
 // Canvas-taint falls back to captureVisibleTab; the content scripts report a
 // `cropRect` (video element CSS box × devicePixelRatio) with the taint signal,
