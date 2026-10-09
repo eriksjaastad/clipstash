@@ -24,6 +24,7 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const adaptersSrc = readFileSync(join(root, "extension/lib/adapters.js"), "utf8");
+const frameSrc = readFileSync(join(root, "extension/lib/frame.js"), "utf8");
 const urlsSrc = readFileSync(join(root, "extension/lib/urls.js"), "utf8");
 const capturedOverlaySrc = readFileSync(join(root, "extension/lib/captured-overlay.js"), "utf8");
 const contentSrc = readFileSync(join(root, "extension/content.js"), "utf8");
@@ -87,6 +88,10 @@ function loadAdapters(sandbox) {
   // The script's final expression is the assignment to globalThis.ClipStashAdapters,
   // so runInNewContext returns the adapter registry object directly.
   return runInNewContext(adaptersSrc, sandbox, { filename: "adapters.js" });
+}
+
+function loadFrame(sandbox) {
+  return runInNewContext(frameSrc, sandbox, { filename: "frame.js" });
 }
 
 function loadUrls(sandbox) {
@@ -242,19 +247,6 @@ async function extractFor(url, doc) {
     captured.has(urls.canonicalizeVideoUrl("https://www.instagram.com/reel/CxYz123/?utm_source=grid")),
     "grid reel href hits the same captured IG key"
   );
-}
-
-{
-  // adapters.js exposes the shared canonicalize + site gate when urls.js is loaded.
-  const sandbox = makeContext("https://www.youtube.com/watch?v=dQw4w9WgXcQ", makeDocument({}));
-  loadUrls(sandbox);
-  const adapters = loadAdapters(sandbox);
-  check(
-    adapters.canonicalizeVideoUrl("https://youtu.be/dQw4w9WgXcQ") === "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-    "ClipStashAdapters.canonicalizeVideoUrl delegates to ClipStashUrls"
-  );
-  check(adapters.isGreenCheckSite("https://www.tiktok.com/@a/video/1") === true, "ClipStashAdapters.isGreenCheckSite true for TikTok");
-  check(adapters.isGreenCheckSite("https://x.com/a/status/1") === false, "ClipStashAdapters.isGreenCheckSite false for X");
 }
 
 // -- captured-overlay.js: badge application + X no-op -------------------------
@@ -467,9 +459,11 @@ function makeCanvasDoc(video, { taint } = {}) {
   return document;
 }
 
-async function runContent(url, doc) {
+async function runContent(url, doc, now) {
   const sandbox = makeContext(url, doc);
+  if (now) sandbox.Date = { now };
   loadAdapters(sandbox);
+  loadFrame(sandbox);
   return runInNewContext(contentSrc, sandbox, { filename: "content.js" });
 }
 
@@ -495,6 +489,17 @@ async function runContent(url, doc) {
       result.cropRect.height === 360 &&
       result.cropRect.dpr === 2,
     "content.js taint signal includes cropRect with x/y/width/height/dpr"
+  );
+}
+
+{
+  // A video needs both frame dimensions; a fake clock jumps past the 4 s wait.
+  let clock = 0;
+  const video = { ...makeVideo(), videoHeight: 0 };
+  const result = await runContent("https://www.youtube.com/watch?v=dQw4w9WgXcQ", makeCanvasDoc(video), () => (clock += 5000));
+  check(
+    result.ok === false && result.error === "frame capture failed: video has no frame dimensions (not playing?)",
+    "content.js times out on a video with width but no height"
   );
 }
 
@@ -584,6 +589,7 @@ function makeBurstDocument(video, { taint = false, throwNonTaint = false } = {})
 async function runBurst(url, doc) {
   const sandbox = makeContext(url, doc);
   loadAdapters(sandbox);
+  loadFrame(sandbox);
   return runInNewContext(burstSrc, sandbox, { filename: "burst.js" });
 }
 
@@ -847,7 +853,7 @@ function checkTabAccess(label, bg, files) {
 // stores the history entry, and stays out of the burst machinery.
 function checkSavePacketSuccess(label, bg, response) {
   checkFields(`${label} response`, response, { ok: true, packet: PACKET, photoshop: PHOTOSHOP_PLACED });
-  checkTabAccess(label, bg, ["lib/adapters.js", "content.js"]);
+  checkTabAccess(label, bg, ["lib/adapters.js", "lib/frame.js", "content.js"]);
   check(sameJson(bg.storage.clipstashHistory, [PACKET_HISTORY_ENTRY]), `${label} stores the full history entry`);
   check(bg.openedTabs.length === 0, `${label} opens no tab`);
   check(bg.pollStarts() === 0, `${label} starts no pending-history polling`);
@@ -858,7 +864,7 @@ function checkSavePacketSuccess(label, bg, response) {
 // picker reports the chosen frame.
 function checkBurstPickSuccess(label, bg, response, expected) {
   checkFields(`${label} response`, response, expected);
-  checkTabAccess(label, bg, ["lib/adapters.js", "lib/burst.js"]);
+  checkTabAccess(label, bg, ["lib/adapters.js", "lib/frame.js", "lib/burst.js"]);
   check(bg.openedTabs.join() === expected.picker_url, `${label} opens only the picker tab`);
   check(bg.pollStarts() === 1, `${label} starts pending-history polling once`);
   check(bg.storage.clipstashHistory === undefined, `${label} writes no history before the pick`);

@@ -141,7 +141,7 @@ async function captureAndSave(placePhotoshop, name) {
   try {
     injection = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      files: ["lib/adapters.js", "content.js"],
+      files: ["lib/adapters.js", "lib/frame.js", "content.js"],
     });
   } catch (error) {
     return { ok: false, error: `injection failed: ${error}` };
@@ -221,7 +221,7 @@ async function captureBurstAndOpenPicker(placePhotoshop, name) {
   try {
     injection = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      files: ["lib/adapters.js", "lib/burst.js"],
+      files: ["lib/adapters.js", "lib/frame.js", "lib/burst.js"],
     });
   } catch (error) {
     return { ok: false, error: `burst injection failed: ${error}` };

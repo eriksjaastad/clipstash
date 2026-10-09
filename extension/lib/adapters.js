@@ -9,14 +9,8 @@
 //   }
 //
 // Injected into pages by background.js; exposed as
-// `globalThis.ClipStashAdapters` for content.js. The first matching adapter
+// `globalThis.ClipStashAdapters` for lib/frame.js. The first matching adapter
 // wins; the generic adapter is the always-matching fallback of last resort.
-//
-// The public `canonicalizeVideoUrl` / `isGreenCheckSite` exports used by the
-// #7691 green-check overlay delegate to `globalThis.ClipStashUrls` from
-// `lib/urls.js` (the single shared canonicalize copy), so load urls.js before
-// calling them. The private per-site canonical helpers below stay the capture
-// path and are intentionally unchanged.
 
 globalThis.ClipStashAdapters = (() => {
   const registry = [];
@@ -122,7 +116,7 @@ globalThis.ClipStashAdapters = (() => {
 
   // -- YouTube ---------------------------------------------------------------
 
-  const youtube = register({
+  register({
     id: "youtube",
     matches(url) {
       return hostnameMatchesAny(url, ["youtube.com", "youtu.be"]);
@@ -143,7 +137,7 @@ globalThis.ClipStashAdapters = (() => {
 
   // -- X / Twitter -----------------------------------------------------------
 
-  const x = register({
+  register({
     id: "x",
     matches(url) {
       return hostnameMatchesAny(url, ["x.com", "twitter.com"]);
@@ -166,7 +160,7 @@ globalThis.ClipStashAdapters = (() => {
 
   // -- Instagram -------------------------------------------------------------
 
-  const instagram = register({
+  register({
     id: "instagram",
     matches(url) {
       return hostnameMatches(url, "instagram.com");
@@ -191,7 +185,7 @@ globalThis.ClipStashAdapters = (() => {
 
   // -- TikTok ----------------------------------------------------------------
 
-  const tiktok = register({
+  register({
     id: "tiktok",
     matches(url) {
       return hostnameMatches(url, "tiktok.com");
@@ -217,7 +211,7 @@ globalThis.ClipStashAdapters = (() => {
 
   // -- Generic fallback ------------------------------------------------------
 
-  const generic = register({
+  register({
     id: "generic",
     matches() {
       return true;
@@ -235,24 +229,5 @@ globalThis.ClipStashAdapters = (() => {
     },
   });
 
-  return {
-    register,
-    adapt,
-    adapters: registry,
-    canonicalizeVideoUrl(url) {
-      const urls = globalThis.ClipStashUrls;
-      return urls ? urls.canonicalizeVideoUrl(url) : "";
-    },
-    isGreenCheckSite(url) {
-      const urls = globalThis.ClipStashUrls;
-      return urls ? urls.isGreenCheckSite(url) : false;
-    },
-    ids: {
-      youtube: youtube.id,
-      x: x.id,
-      instagram: instagram.id,
-      tiktok: tiktok.id,
-      generic: generic.id,
-    },
-  };
+  return { adapt };
 })();

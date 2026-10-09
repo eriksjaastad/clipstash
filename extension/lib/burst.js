@@ -1,16 +1,11 @@
-// clipstash burst capture content script (injected by the service worker on demand).
+// clipstash burst capture content script (injected by the service worker on
+// demand, after lib/adapters.js and lib/frame.js).
 //
 // Steps video.currentTime by ±STEP × N around the current position and
-// canvas-captures each frame to a PNG data URL. If the canvas is tainted by
-// cross-origin media (e.g. googlevideo on YouTube), the script returns the
-// metadata plus `tainted: true` so background.js can try a helper-native
-// ffmpeg burst from the video's media URL before falling back to a single
-// chrome.tabs.captureVisibleTab shot for the burst session. That fallback
-// signal also carries `cropRect` — the video element's on-screen CSS box ×
-// devicePixelRatio — so the helper can crop the full-tab PNG to the video
-// rectangle. Crop caveat: letterboxed / object-fit videos may include black
-// bars inside the element box; the CSS box is the best practical crop without
-// decoding the media.
+// canvas-captures each frame to a PNG data URL. If the canvas is tainted, it
+// returns metadata plus `tainted: true`, `mediaUrl` and `cropRect` so
+// background.js can try a helper-native ffmpeg burst before falling back to a
+// single chrome.tabs.captureVisibleTab shot (see lib/frame.js).
 //
 // The final expression is a Promise; chrome.scripting.executeScript waits for
 // it and returns the resolved object to background.js.
@@ -20,27 +15,15 @@
   const N = 7;
 
   try {
-    const adapters = globalThis.ClipStashAdapters;
-    const adapter = adapters ? adapters.adapt(location.href) : null;
-    if (!adapter) {
-      return { ok: false, error: "no site adapter available" };
+    const frame = globalThis.ClipStashFrame;
+    if (!frame) {
+      return { ok: false, error: "no frame helpers available" };
     }
-
-    const video = adapter.findVideo(document);
-    if (!video) {
-      return { ok: false, error: "no <video> element found on this page" };
+    const prepared = await frame.prepare();
+    if (!prepared.ok) {
+      return prepared;
     }
-
-    await waitForVideoReady(video);
-
-    const info = await adapter.extract({ document, location, video });
-    const metadata = {
-      title: info.title || document.title || location.href,
-      sourceUrl: info.sourceUrl || location.href,
-      pageUrl: location.href,
-      timestampSec: typeof info.currentTime === "number" ? info.currentTime : undefined,
-      site: adapter.id,
-    };
+    const { video, metadata } = prepared;
 
     const center = typeof video.currentTime === "number" ? video.currentTime : 0;
     const canSeek = Boolean(video.seekable && video.seekable.length > 0);
@@ -62,9 +45,9 @@
       for (const target of targets) {
         if (canSeek) await seekVideo(video, target);
         try {
-          frames.push(captureFrame(video));
+          frames.push(frame.captureFrame(video));
         } catch (error) {
-          if (isCanvasTaintError(error)) {
+          if (frame.isCanvasTaintError(error)) {
             tainted = true;
             break;
           }
@@ -90,7 +73,7 @@
           ...metadata,
           mediaUrl: video.currentSrc || video.src || "",
           captureMethod: "burst_visible_tab",
-          cropRect: videoCropRect(video),
+          cropRect: frame.videoCropRect(video),
           error: "burst canvas capture failed (tainted)",
         };
       }
@@ -112,59 +95,6 @@
     };
   }
 })();
-
-function waitForVideoReady(video, timeoutMs = 4000) {
-  return new Promise((resolve, reject) => {
-    const start = Date.now();
-    const check = () => {
-      if (video && video.videoWidth > 0 && video.videoHeight > 0) {
-        resolve();
-        return;
-      }
-      if (Date.now() - start >= timeoutMs) {
-        reject(new Error("video has no frame dimensions (not playing?)"));
-        return;
-      }
-      setTimeout(check, 100);
-    };
-    check();
-  });
-}
-
-function captureFrame(video) {
-  const canvas = document.createElement("canvas");
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  const ctx = canvas.getContext("2d");
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/png");
-}
-
-function isCanvasTaintError(error) {
-  return Boolean(
-    error &&
-      (error.name === "SecurityError" || /taint/i.test(String(error.message || error)))
-  );
-}
-
-function videoCropRect(video) {
-  try {
-    const rect = video.getBoundingClientRect();
-    const rawDpr = window.devicePixelRatio;
-    const dpr = Number.isFinite(rawDpr) && rawDpr > 0 ? rawDpr : 1;
-    return {
-      x: rect.left,
-      y: rect.top,
-      width: rect.width,
-      height: rect.height,
-      dpr,
-    };
-  } catch (_error) {
-    // A missing rect must not break the taint fallback; the helper saves the
-    // full tab when cropRect is absent.
-    return null;
-  }
-}
 
 function seekTargets(video, center, offsets) {
   const start = video.seekable.start(0);
