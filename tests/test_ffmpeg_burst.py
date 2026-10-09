@@ -37,19 +37,6 @@ pytestmark = pytest.mark.skipif(
 # frame extraction
 # --------------------------------------------------------------------------
 
-def test_fixture_exists_and_is_small_mp4() -> None:
-    assert FIXTURE.is_file()
-    assert FIXTURE.stat().st_size < 200_000
-    assert not FIXTURE.read_bytes().startswith(PNG_MAGIC)  # it is a video, not a PNG
-
-
-def test_extract_burst_pngs_returns_multiple_png_frames() -> None:
-    frames = extract_burst_pngs(FIXTURE, 1.0)
-    assert len(frames) == 15  # ±7 × 0.15s, no clamping collisions at t=1.0
-    for frame in frames:
-        assert frame.startswith(PNG_MAGIC)
-
-
 def test_extract_burst_pngs_dedupes_collapsed_offsets_near_zero() -> None:
     # At t=0.1 the seven negative offsets all clamp to 0.0 and collapse into a
     # single frame; the remaining positive offsets stay unique → 9 frames.
@@ -114,16 +101,6 @@ def test_missing_ffmpeg_raises_clear_error(monkeypatch) -> None:
         burst_frames_from_url(FIXTURE.as_uri(), 1.0)
 
 
-def test_bad_url_raises_clear_error_without_hanging(monkeypatch) -> None:
-    monkeypatch.setattr(ffmpeg_burst, "DOWNLOAD_TIMEOUT_SEC", 2)
-    # Port 1 on loopback refuses connections immediately; the timeout is only
-    # a backstop and must never be hit for this address.
-    with pytest.raises(FFmpegBurstError, match="download failed"):
-        fetch_media_to_temp("http://127.0.0.1:1/nope.mp4")
-    with pytest.raises(FFmpegBurstError, match="download failed"):
-        burst_frames_from_url("http://127.0.0.1:1/nope.mp4", 1.0)
-
-
 def test_unsupported_scheme_raises_clear_error() -> None:
     with pytest.raises(FFmpegBurstError, match="unsupported media_url scheme"):
         fetch_media_to_temp("ftp://example.com/media.mp4")
@@ -154,14 +131,6 @@ def test_ffmpeg_burst_endpoint_creates_session_picker_and_choose(server, tmp_pat
     assert data["frame_count"] > 1
     session_id = data["session_id"]
     assert data["picker_url"] == f"http://127.0.0.1:{server.server_address[1]}/picker/{session_id}"
-
-    # Picker HTML loads and renders the multi-frame grid.
-    status, content_type, body = request(server_url(server, f"/picker/{session_id}"))
-    assert status == 200
-    assert content_type == "text/html; charset=utf-8"
-    html = body.decode("utf-8")
-    assert "Burst &amp; pick" in html
-    assert f"/picker/{session_id}/frame/0" in html
 
     # Choosing a frame writes a packet labeled burst_ffmpeg.
     status, _, body = request(

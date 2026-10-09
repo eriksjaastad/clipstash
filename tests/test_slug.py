@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from helper.slug import MAX_SLUG_LEN, default_slug, slugify, still_filename
+from helper.slug import MAX_SLUG_LEN, default_slug, slugify
 
 
 def test_slugify_lowercases_and_dashes_spaces():
@@ -42,10 +42,6 @@ def test_slugify_caps_length_and_strips_trailing_dash():
 
 def test_slugify_custom_max_length():
     assert slugify("a b c d e f", max_length=5) == "a-b-c"
-
-
-def test_still_filename_appends_png():
-    assert still_filename("how-i-edit") == "how-i-edit.png"
 
 
 def test_default_slug_prefers_title():

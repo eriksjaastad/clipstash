@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 
-from support import PNG_1PX, PNG_1PX_B64, request, server_url
+from support import PNG_1PX, PNG_1PX_B64, post_multipart_packet, request, server_url
 
 from helper import bursts, photoshop
 from helper.photoshop import (
@@ -336,6 +336,15 @@ def test_post_packet_photoshop_flag_places(server, tmp_path, monkeypatch):
         "method": "mock",
     }
     assert calls == [tmp_path / "youtube" / payload["packet"]["id"] / "photoshop-packet.png"]
+
+
+def test_post_multipart_packet_photoshop_field_places(server, tmp_path, monkeypatch):
+    calls = patch_place(monkeypatch)
+    status, _, body = post_multipart_packet(
+        server, title="Photoshop packet", source_url="https://example.com/1", photoshop="true"
+    )
+    assert status == 201
+    assert calls == [tmp_path / "generic" / json.loads(body)["packet"]["id"] / "photoshop-packet.png"]
 
 
 def test_post_packet_without_flag_does_not_place(server, monkeypatch):

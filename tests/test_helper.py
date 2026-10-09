@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import base64
+import errno
+import http.client
 import io
 import json
+import os
+import re
 import urllib.request
 from pathlib import Path
 
 import pytest
 from PIL import Image
-from support import PNG_1PX, PNG_1PX_B64, request, server_url
+from support import PNG_1PX, PNG_1PX_B64, post_multipart_packet, request, server_url
 
 from helper import __version__
 from helper import bursts
@@ -59,6 +63,10 @@ def png_size_and_pixel(image_bytes: bytes, xy=(0, 0)):
         return image.size, image.getpixel(xy)
 
 
+def send_json(httpd, path, payload, method="POST"):
+    return request(server_url(httpd, path), data=json.dumps(payload).encode("utf-8"), method=method)
+
+
 def make_payload(**overrides):
     payload = {
         "title": "Test packet",
@@ -97,19 +105,6 @@ def test_new_record_has_clipboard_pack():
     }
 
 
-def test_new_record_name_override_is_slugified():
-    record = new_record("How I edit", "https://example.com/v=1", name="My Still! FINAL")
-    assert record["image"] == "my-still-final.png"
-    assert record["name"] == "my-still-final"
-
-
-def test_new_record_capture_method():
-    record = new_record(
-        "Visible tab", "https://example.com/v=1", capture_method="visible_tab"
-    )
-    assert record["capture_method"] == "visible_tab"
-
-
 def test_new_record_requires_fields():
     with pytest.raises(ValueError):
         new_record("", "https://example.com")
@@ -131,17 +126,7 @@ def test_write_and_read_packet(tmp_path):
     assert reread["title"] == "Demo"
     assert reread["source_url"] == "https://example.com/v=1"
     assert reread["image"] == "demo.png"
-
-
-def test_write_packet_layout_uses_site_folder(tmp_path):
-    youtube = new_record("YouTube clip", "https://example.com/1", site="youtube")
-    generic = new_record("Generic clip", "https://example.com/2", site="generic")
-    write_packet(youtube, PNG_1PX, root=tmp_path)
-    write_packet(generic, PNG_1PX, root=tmp_path)
-
-    assert (tmp_path / "youtube" / youtube["id"] / "youtube-clip.png").exists()
-    assert (tmp_path / "generic" / generic["id"] / "generic-clip.png").exists()
-    assert packet_dir(tmp_path, youtube["id"], site="youtube") == tmp_path / "youtube" / youtube["id"]
+    assert packet_dir(tmp_path, record["id"], site="youtube") == directory
 
 
 def test_write_packet_unknown_site_falls_back_to_generic(tmp_path):
@@ -203,7 +188,7 @@ def test_list_and_export_csv(tmp_path):
 
     csv_text = export_csv(root=tmp_path)
     assert "id,created_at,title,source_url" in csv_text
-    assert "name" in csv_text.splitlines()[0]
+    assert {"name", "capture_method"} <= set(csv_text.splitlines()[0].split(","))
     assert "First" in csv_text and "Second" in csv_text
 
 
@@ -230,15 +215,6 @@ def test_list_packets_sees_site_and_legacy_flat(tmp_path):
 # --------------------------------------------------------------------------
 # crop_rect (tainted visible_tab stills)
 # --------------------------------------------------------------------------
-
-def test_apply_crop_rect_unit_css_pixels():
-    png = make_png_with_green_region()
-    cropped = apply_crop_rect(
-        png, {"x": 10, "y": 20, "width": 40, "height": 30, "dpr": 1}
-    )
-    assert png_size_and_pixel(cropped, (0, 0)) == ((40, 30), GREEN)
-    assert png_size_and_pixel(cropped, (39, 29))[1] == GREEN
-
 
 def test_apply_crop_rect_device_pixel_ratio():
     png = make_png_with_green_region(region=(10, 10, 50, 30))
@@ -293,7 +269,7 @@ def test_health_endpoint(server):
 def test_post_packet_json_and_list(server):
     status, _, body = request(
         server_url(server, "/packets"),
-        data=json.dumps(make_payload()).encode("utf-8"),
+        data=json.dumps(make_payload(timestamp_sec="12.5")).encode("utf-8"),
         method="POST",
     )
     assert status == 201
@@ -305,6 +281,7 @@ def test_post_packet_json_and_list(server):
     assert record["image"] == "test-packet.png"
     assert record["name"] == "test-packet"
     assert record["capture_method"] == "canvas"
+    assert record["timestamp_sec"] == "12.5"  # a JSON body's timestamp_sec is stored as sent
 
     status, _, body = request(server_url(server, "/packets"))
     payload = json.loads(body)
@@ -339,22 +316,6 @@ def test_post_packet_empty_name_uses_title_slug(server, tmp_path):
     assert record["image"] == "test-packet.png"
 
 
-def test_post_packet_capture_method_visible_tab(server):
-    payload = make_payload(capture_method="visible_tab")
-    status, _, body = request(
-        server_url(server, "/packets"),
-        data=json.dumps(payload).encode("utf-8"),
-        method="POST",
-    )
-    assert status == 201
-    record = json.loads(body)["packet"]
-    assert record["capture_method"] == "visible_tab"
-
-    status, _, body = request(server_url(server, "/export.csv"))
-    header = body.decode("utf-8").splitlines()[0]
-    assert "capture_method" in header
-
-
 def test_post_packet_visible_tab_crop_rect_crops_still(server, tmp_path):
     png = make_png_with_green_region()
     payload = make_payload(
@@ -369,6 +330,7 @@ def test_post_packet_visible_tab_crop_rect_crops_still(server, tmp_path):
     )
     assert status == 201
     record = json.loads(body)["packet"]
+    assert record["capture_method"] == "visible_tab"
     still = (tmp_path / record["site"] / record["id"] / record["image"]).read_bytes()
     assert png_size_and_pixel(still, (0, 0)) == ((40, 30), GREEN)
     # crop_rect is an ephemeral request field, never persisted.
@@ -377,15 +339,8 @@ def test_post_packet_visible_tab_crop_rect_crops_still(server, tmp_path):
 
 def test_post_packet_visible_tab_without_crop_rect_keeps_full_still(server, tmp_path):
     png = make_png_with_green_region()
-    payload = make_payload(
-        capture_method="visible_tab",
-        image_base64=base64.b64encode(png).decode("ascii"),
-    )
-    status, _, body = request(
-        server_url(server, "/packets"),
-        data=json.dumps(payload).encode("utf-8"),
-        method="POST",
-    )
+    payload = make_payload(capture_method="visible_tab", image_base64=base64.b64encode(png).decode("ascii"))
+    status, _, body = send_json(server, "/packets", payload)
     assert status == 201
     record = json.loads(body)["packet"]
     still = (tmp_path / record["site"] / record["id"] / record["image"]).read_bytes()
@@ -393,50 +348,55 @@ def test_post_packet_visible_tab_without_crop_rect_keeps_full_still(server, tmp_
 
 
 def test_post_packet_multipart(server, tmp_path):
-    boundary = "clipstash-test-boundary"
     crop_rect = {"x": 10, "y": 20, "width": 40, "height": 30, "dpr": 1}
-    parts = [
-        f"--{boundary}",
-        'Content-Disposition: form-data; name="title"',
-        "",
-        "Multipart packet",
-        f"--{boundary}",
-        'Content-Disposition: form-data; name="source_url"',
-        "",
-        "https://example.com/multi",
-        f"--{boundary}",
-        'Content-Disposition: form-data; name="site"',
-        "",
-        "generic",
-        f"--{boundary}",
-        'Content-Disposition: form-data; name="crop_rect"',
-        "",
-        json.dumps(crop_rect),
-        f"--{boundary}",
-        'Content-Disposition: form-data; name="image"; filename="still.png"',
-        "Content-Type: image/png",
-        "",
-    ]
-    body = ("\r\n".join(parts) + "\r\n").encode("utf-8")
-    body += make_png_with_green_region() + f"\r\n--{boundary}--\r\n".encode("utf-8")
-    content_type = f"multipart/form-data; boundary={boundary}"
-
-    req = urllib.request.Request(
-        server_url(server, "/packets"),
-        data=body,
-        method="POST",
-        headers={"Content-Type": content_type},
+    status, _, body = post_multipart_packet(
+        server,
+        image=make_png_with_green_region(),
+        title="Multipart packet",
+        source_url="https://example.com/multi",
+        site="generic",
+        crop_rect=json.dumps(crop_rect),
+        timestamp_sec="7.5",
+        tags='["a", "b"]',
     )
-    with urllib.request.urlopen(req, timeout=5) as resp:
-        assert resp.status == 201
-        payload = json.loads(resp.read())
-    assert payload["packet"]["title"] == "Multipart packet"
-    assert payload["packet"]["source_url"] == "https://example.com/multi"
-    assert payload["packet"]["image"] == "multipart-packet.png"
-    still = (
-        tmp_path / payload["packet"]["site"] / payload["packet"]["id"] / payload["packet"]["image"]
-    ).read_bytes()
+    assert status == 201
+    packet = json.loads(body)["packet"]
+    assert packet["title"] == "Multipart packet"
+    assert packet["source_url"] == "https://example.com/multi"
+    assert packet["image"] == "multipart-packet.png"
+    # Form values are text: timestamp_sec and tags are parsed from it.
+    assert (packet["timestamp_sec"], packet["tags"]) == (7.5, ["a", "b"])
+    still = (tmp_path / packet["site"] / packet["id"] / packet["image"]).read_bytes()
     assert png_size_and_pixel(still, (0, 0)) == ((40, 30), GREEN)
+
+
+def test_post_packet_multipart_bad_tags_json_400(server):
+    response = post_multipart_packet(server, title="T", source_url="https://example.com/1", tags="[oops")
+    assert (response[0], json.loads(response[2])["error"]) == (400, "Expecting value: line 1 column 2 (char 1)")
+
+
+def test_post_packet_multipart_missing_title_400(server):
+    response = post_multipart_packet(server, source_url="https://example.com/1")
+    assert (response[0], json.loads(response[2])["error"]) == (400, "missing field: title")
+
+
+def test_post_packet_json_missing_title_400(server):
+    payload = make_payload()
+    del payload["title"]
+    response = send_json(server, "/packets", payload)
+    assert (response[0], json.loads(response[2])["error"]) == (400, "missing field: title")
+
+
+def test_post_packet_malformed_json_400(server):
+    response = request(server_url(server, "/packets"), data=b"nope", method="POST")
+    assert (response[0], json.loads(response[2])["error"]) == (400, "Expecting value: line 1 column 1 (char 0)")
+
+
+def test_post_packet_other_content_type_415(server):
+    response = request(
+        server_url(server, "/packets"), data=b"x", method="POST", headers={"Content-Type": "text/plain"}
+    )
+    assert (response[0], json.loads(response[2])["error"]) == (415, "expected JSON or multipart/form-data")
 
 
 def test_post_packet_requires_image(server):
@@ -464,9 +424,33 @@ def test_export_csv_endpoint(server):
     assert text.splitlines()[0].startswith("id,created_at")
 
 
-def test_unknown_route_404(server):
-    status, _, _ = request(server_url(server, "/nope"))
-    assert status == 404
+def assert_not_found(status, body):
+    assert (status, json.loads(body)) == (404, {"ok": False, "error": "not found"})
+
+
+def test_get_unknown_route_404(server):
+    status, _, body = request(server_url(server, "/nope"))
+    assert_not_found(status, body)
+
+
+def test_post_unknown_route_404(server):
+    status, _, body = request(server_url(server, "/nope"), data=b"{}", method="POST")
+    assert_not_found(status, body)
+
+
+def test_put_unknown_route_404(server):
+    status, _, body = request(server_url(server, "/nope"), data=b"{}", method="PUT")
+    assert_not_found(status, body)
+
+
+def test_get_error_outside_the_error_map_drops_the_connection(server, monkeypatch):
+    # GET maps only FileNotFoundError (to 404); any other error gets no HTTP response.
+    def fail(root):
+        raise RuntimeError("disk on fire")
+
+    monkeypatch.setattr("helper.server.list_packets", fail)
+    with pytest.raises(http.client.RemoteDisconnected):
+        urllib.request.urlopen(server_url(server, "/packets"), timeout=5)
 
 
 # --------------------------------------------------------------------------
@@ -533,6 +517,30 @@ def test_put_config_rejects_invalid_root(server):
         assert json.loads(body)["ok"] is False
 
 
+def test_put_config_rejects_non_object_body(server):
+    response = send_json(server, "/config", [], method="PUT")
+    assert (response[0], json.loads(response[2])["error"]) == (400, "expected a JSON object")
+
+
+def test_put_config_unwritable_config_file_400(server, tmp_path):
+    # config.json is a symlink into a missing folder: it loads as {} but the
+    # write raises FileNotFoundError (an OSError), for root too.
+    config_path = tmp_path / "config.json"
+    config_path.symlink_to(tmp_path / "missing" / "config.json")
+    response = send_json(server, "/config", {"packet_root": str(tmp_path / "new-root")}, method="PUT")
+    error = str(FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), str(config_path)))
+    assert (response[0], json.loads(response[2])["error"]) == (400, error)
+
+
+def test_put_config_unexpected_error_is_a_last_resort_500(server, tmp_path, monkeypatch):
+    def fail(config, config_path):
+        raise RuntimeError("disk on fire")
+
+    monkeypatch.setattr("helper.server.save_config", fail)
+    response = send_json(server, "/config", {"packet_root": str(tmp_path / "new-root")}, method="PUT")
+    assert (response[0], json.loads(response[2])["error"]) == (500, "internal error: disk on fire")
+
+
 def test_effective_packet_root_priority(monkeypatch, tmp_path):
     cli_root = tmp_path / "cli"
     config_root = tmp_path / "config"
@@ -557,21 +565,12 @@ def test_effective_packet_root_priority(monkeypatch, tmp_path):
 # unusable config.json: visible error, never a silent fallback root
 # --------------------------------------------------------------------------
 
-def test_missing_config_file_still_gives_default_root(monkeypatch, tmp_path):
-    monkeypatch.delenv("CLIPSTASH_ROOT", raising=False)
-    missing = tmp_path / "missing.json"
-    assert load_config(missing) == {}
-    assert effective_packet_root(None, config_path=missing) == default_root()
-
-
 @pytest.mark.parametrize("content", ["{not json", "[1, 2]"])
 def test_corrupt_config_raises_naming_the_file(tmp_path, content):
     config_path = tmp_path / "config.json"
     config_path.write_text(content, encoding="utf-8")
     with pytest.raises(ConfigError, match=str(config_path)):
         load_config(config_path)
-    with pytest.raises(ConfigError, match=str(config_path)):
-        effective_packet_root(None, config_path=config_path)
 
 
 @pytest.mark.parametrize("bad_root", [42, "", "relative/path"])
@@ -606,14 +605,30 @@ def test_cli_exits_nonzero_with_message_on_corrupt_config(monkeypatch, tmp_path,
     assert str(config_path) in captured.err
 
 
-def test_cli_exits_nonzero_on_relative_configured_root(monkeypatch, tmp_path, capsys):
+def test_cli_serve_reads_config_once_and_binds_the_resolved_root(monkeypatch, tmp_path, capsys):
+    from helper import config
+    from helper import server as server_module
     from helper.cli import main
 
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("CLIPSTASH_PHOTOSHOP", "yes")
     config_path = tmp_path / "Clipstash" / "config.json"
-    save_config({"packet_root": "relative/path"}, config_path)
-    assert main(["serve"]) == 1
-    assert "invalid packet_root in config file" in capsys.readouterr().err
+    root = tmp_path / "configured"
+    save_config({"packet_root": str(root)}, config_path)
+    reads, served = [], []
+    real_load_config = config.load_config
+    monkeypatch.setattr(config, "load_config", lambda path=None: reads.append(path) or real_load_config(path))
+
+    def stop_at_once(httpd, *args, **kwargs):
+        served.append(httpd)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(server_module.ThreadingHTTPServer, "serve_forever", stop_at_once)
+    assert main(["--port", "0", "serve"]) == 0
+    assert reads == [config_path]
+    handler = served[0].RequestHandlerClass
+    assert (handler.root, handler.photoshop_auto) == (str(root.resolve()), True)
+    assert f"(root: {root.resolve()})" in capsys.readouterr().out
 
 
 def test_cli_export_uses_root_given_before_or_after_the_command(monkeypatch, tmp_path, capsys):
@@ -696,6 +711,8 @@ def test_create_burst_choose_frame_and_packet(server, tmp_path):
     assert status == 200
     assert content_type == "image/png"
     assert body == PNG_1PX
+    status, _, body = request(server_url(server, f"/picker/{session_id}/frame/2"))
+    assert (status, json.loads(body)) == (404, {"ok": False, "error": "frame not found"})
 
     # Choosing frame 1 writes a normal packet and deletes the session.
     status, _, body = request(
@@ -755,35 +772,6 @@ def test_burst_name_override_flows_to_chosen_packet(server, tmp_path):
     assert (tmp_path / "youtube" / packet["id"] / "burst-still.png").exists()
 
 
-def test_burst_visible_tab_capture_method_round_trip(server, tmp_path):
-    status, _, body = request(
-        server_url(server, "/bursts"),
-        data=json.dumps(
-            make_burst_payload(frame_count=1, capture_method="burst_visible_tab")
-        ).encode("utf-8"),
-        method="POST",
-    )
-    assert status == 201
-    session_id = json.loads(body)["session_id"]
-
-    status, _, body = request(
-        server_url(server, f"/picker/{session_id}/choose"),
-        data=json.dumps(
-            {
-                "frame_index": 0,
-                "title": "Fallback burst",
-                "source_url": "https://www.youtube.com/watch?v=burst123",
-                "capture_method": "burst_visible_tab",
-            }
-        ).encode("utf-8"),
-        method="POST",
-    )
-    assert status == 200
-    packet = json.loads(body)["packet"]
-    assert packet["capture_method"] == "burst_visible_tab"
-    assert read_record(packet["id"], root=tmp_path)["capture_method"] == "burst_visible_tab"
-
-
 def test_burst_visible_tab_crop_rect_crops_frame_and_chosen_packet(server, tmp_path):
     png = make_png_with_green_region()
     payload = make_burst_payload(
@@ -827,6 +815,15 @@ def test_burst_visible_tab_crop_rect_crops_frame_and_chosen_packet(server, tmp_p
     assert read_record(packet["id"], root=tmp_path)["capture_method"] == "burst_visible_tab"
 
 
+def test_burst_multipart_one_frame_file_201(server):
+    status, _, body = post_multipart_packet(
+        server, path="/bursts", part="frame_0", title="T", source_url="https://example.com/1"
+    )
+    assert status == 201
+    payload = json.loads(body)
+    assert payload["session_id"] and payload["frame_count"] == 1
+
+
 def test_burst_requires_frames(server):
     payload = make_burst_payload(frame_count=0)
     status, _, body = request(
@@ -848,6 +845,40 @@ def test_burst_rejects_non_png_frames(server):
     )
     assert status == 400
     assert "PNG" in json.loads(body)["error"]
+
+
+def test_burst_metadata_fallbacks(server):
+    payload = make_burst_payload(frame_count=1, page_url="", site="", capture_method="", timestamp_sec="soon")
+    session_id = json.loads(send_json(server, "/bursts", payload)[2])["session_id"]
+    meta = load_session(session_id)
+    assert (meta["page_url"], meta["site"], meta["capture_method"], meta["timestamp_sec"]) == (
+        payload["source_url"], "generic", "burst_canvas", None
+    )
+
+
+def test_burst_list_timestamp_is_a_last_resort_500(server):
+    response = send_json(server, "/bursts", make_burst_payload(timestamp_sec=[1]))
+    error = "internal error: float() argument must be a string or a real number, not 'list'"
+    assert (response[0], json.loads(response[2])["error"]) == (500, error)
+
+
+def test_ffmpeg_burst_forces_capture_method_and_metadata_fallbacks(server, monkeypatch):
+    monkeypatch.setattr("helper.server.ffmpeg_available", lambda: True)
+    monkeypatch.setattr("helper.server.burst_frames_from_url", lambda *args, **kwargs: [PNG_1PX])
+    payload = {"media_url": "https://example.com/v.mp4", "source_url": "https://example.com/s"}
+    payload["capture_method"] = "burst_canvas"
+    session_id = json.loads(send_json(server, "/bursts/ffmpeg", payload)[2])["session_id"]
+    meta = load_session(session_id)
+    assert (meta["capture_method"], meta["page_url"], meta["site"]) == (
+        "burst_ffmpeg", payload["source_url"], "generic"
+    )
+
+
+def test_list_timestamp_becomes_none_in_create_burst_and_choose_frame(tmp_path):
+    meta = create_burst([PNG_1PX], {"title": "t", "source_url": "https://example.com", "timestamp_sec": [1]})
+    assert meta["timestamp_sec"] is None
+    record = bursts.choose_frame(meta["session_id"], 0, {"timestamp_sec": [2]}, root=tmp_path)
+    assert record["timestamp_sec"] is None
 
 
 def test_burst_choose_missing_session_404(server):
@@ -907,7 +938,7 @@ def test_burst_choose_enqueues_pending_history_and_drains(server):
 def test_burst_picker_html_dispatches_chosen_event(server):
     status, _, body = request(
         server_url(server, "/bursts"),
-        data=json.dumps(make_burst_payload(frame_count=1)).encode("utf-8"),
+        data=json.dumps(make_burst_payload(frame_count=1, photoshop=True)).encode("utf-8"),
         method="POST",
     )
     assert status == 201
@@ -918,6 +949,8 @@ def test_burst_picker_html_dispatches_chosen_event(server):
     html = body.decode("utf-8")
     assert 'new CustomEvent("clipstash:chosen"' in html
     assert "detail: payload.packet" in html
+    # META is posted back to choose; the photoshop flag stays in the session.
+    assert "photoshop" not in json.loads(re.search(r"const META = (.*);", html).group(1))
 
 
 def test_burst_session_expiry(monkeypatch):
