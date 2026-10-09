@@ -1,4 +1,4 @@
-"""Shared test helpers: HTTP requests against a test server and a 1-px PNG."""
+"""Shared test helpers: HTTP requests (JSON or multipart) against a test server and a 1-px PNG."""
 
 from __future__ import annotations
 
@@ -28,3 +28,16 @@ def request(url: str, data: bytes | None = None, method: str | None = None, head
 def server_url(httpd, path: str) -> str:
     host, port = httpd.server_address
     return f"http://{host}:{port}{path}"
+
+
+def post_multipart_packet(httpd, image: bytes = PNG_1PX, **fields: str):
+    """POST /packets as multipart/form-data: text *fields* plus an ``image`` file part."""
+    boundary = "clipstash-test-boundary"
+    text = "".join(
+        f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'
+        for name, value in fields.items()
+    )
+    part = f'--{boundary}\r\nContent-Disposition: form-data; name="image"; filename="still.png"\r\n\r\n'
+    body = (text + part).encode("utf-8") + image + f"\r\n--{boundary}--\r\n".encode("utf-8")
+    headers = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
+    return request(server_url(httpd, "/packets"), data=body, method="POST", headers=headers)
