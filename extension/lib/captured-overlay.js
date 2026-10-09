@@ -1,4 +1,4 @@
-// clipstash green-check overlay for creator video grids (#7691).
+// clipstash green-check overlay for creator video grids.
 //
 // Runs only on YouTube / TikTok / Instagram (manifest content_script matches
 // plus the explicit isGreenCheckSite gate below). X / Twitter is deliberately
