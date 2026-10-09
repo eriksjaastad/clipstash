@@ -424,10 +424,23 @@ def test_export_csv_endpoint(server):
     assert text.splitlines()[0].startswith("id,created_at")
 
 
-def test_unknown_route_404(server):
-    for method, data in (("GET", None), ("POST", b"{}"), ("PUT", b"{}")):
-        status, _, body = request(server_url(server, "/nope"), data=data, method=method)
-        assert (status, json.loads(body)) == (404, {"ok": False, "error": "not found"}), method
+def assert_not_found(status, body):
+    assert (status, json.loads(body)) == (404, {"ok": False, "error": "not found"})
+
+
+def test_get_unknown_route_404(server):
+    status, _, body = request(server_url(server, "/nope"))
+    assert_not_found(status, body)
+
+
+def test_post_unknown_route_404(server):
+    status, _, body = request(server_url(server, "/nope"), data=b"{}", method="POST")
+    assert_not_found(status, body)
+
+
+def test_put_unknown_route_404(server):
+    status, _, body = request(server_url(server, "/nope"), data=b"{}", method="PUT")
+    assert_not_found(status, body)
 
 
 def test_get_error_outside_the_error_map_drops_the_connection(server, monkeypatch):
