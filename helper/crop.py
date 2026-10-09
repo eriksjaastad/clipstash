@@ -1,24 +1,4 @@
-"""Crop helper for tainted visible-tab captures.
-
-When a cross-origin ``<video>`` taints the capture canvas, the extension falls
-back to ``chrome.tabs.captureVisibleTab``, which returns the *whole* tab (side
-bar, chrome, and all) rather than a clean video frame. To close that gap the
-content script also reports a ``crop_rect`` — the page video element's
-``getBoundingClientRect()`` box in CSS viewport coordinates plus
-``window.devicePixelRatio`` — and this module crops the full-tab PNG to that
-box before the packet/burst frame is written.
-
-Coordinate model
-----------------
-``crop_rect``: ``{x, y, width, height, dpr}`` in CSS pixels. The captured PNG
-is in device pixels, so the crop box is multiplied by ``dpr`` and rounded,
-then clamped to the image bounds. Missing or invalid rects are treated as "no
-crop" and the original bytes are returned unchanged (never a crash).
-
-Caveat: letterboxed / object-fit videos may include black bars inside the
-element box; the CSS box is the best practical crop without decoding the media
-stream itself.
-"""
+"""Crop helper for tainted visible-tab captures (see ``apply_crop_rect``)."""
 
 from __future__ import annotations
 
@@ -32,10 +12,19 @@ from PIL import Image
 def apply_crop_rect(image_bytes: bytes, crop_rect: dict[str, Any] | None) -> bytes:
     """Crop PNG bytes to crop_rect in CSS pixels × dpr, clamped to image bounds.
 
-    ``crop_rect``: ``{x, y, width, height, dpr}`` — CSS viewport coords from
-    ``getBoundingClientRect()`` plus ``window.devicePixelRatio``. Missing or
-    invalid rects, and rects that degenerate to zero size after clamping,
-    return ``image_bytes`` unchanged.
+    When a cross-origin ``<video>`` taints the capture canvas, the extension
+    falls back to ``chrome.tabs.captureVisibleTab``, which returns the *whole*
+    tab (side bar, chrome, and all). The content script then also reports
+    ``crop_rect``: ``{x, y, width, height, dpr}``, the video element's
+    ``getBoundingClientRect()`` box in CSS viewport coords plus
+    ``window.devicePixelRatio``, and the full-tab PNG is cropped to it before
+    the packet/burst frame is written. The PNG is in device pixels, so the
+    box is multiplied by ``dpr`` and rounded, then clamped to the image.
+
+    Missing or invalid rects, and rects that degenerate to zero size after
+    clamping, return ``image_bytes`` unchanged (never a crash). Letterboxed /
+    object-fit videos may keep black bars inside the element box; the CSS box
+    is the best practical crop without decoding the media stream itself.
     """
     if not isinstance(crop_rect, dict):
         return image_bytes

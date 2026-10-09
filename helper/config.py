@@ -19,33 +19,13 @@ naming the file, rather than silently saving packets to a different root.
 Public API
 ----------
 ``CONFIG_FILENAME``
-    Name of the on-disk config file: ``config.json``.
-
 ``ConfigError``
-    Raised when the config file exists but is unusable; the message names
-    the file and the problem. Subclass of ``ValueError``.
-
 ``default_config_path()``
-    Config file path: ``~/Clipstash/config.json``.
-
-``load_config(config_path=None)``
-    Load the helper config. A missing file is ``{}``; an unreadable file,
-    invalid JSON, or a non-object raises ``ConfigError``.
-
-``save_config(config, config_path=None)``
-    Persist the helper config, creating the parent directory as needed.
-
+``load_config()``
+``save_config()``
 ``default_packet_root()``
-    Default save root with no overrides applied: ``~/Clipstash/packets``.
-
-``normalize_packet_root(value)``
-    Validate and normalize a user-supplied packet root (absolute or ``~``
-    path; create-on-write, so the directory need not exist yet).
-
-``effective_packet_root(cli_root=None, config_path=None)``
-    Resolve the packet root by priority: CLI ``--root`` > config file
-    ``packet_root`` > ``CLIPSTASH_ROOT`` > ``~/Clipstash/packets``. A
-    ``packet_root`` present in the config but invalid raises ``ConfigError``.
+``normalize_packet_root()``
+``effective_packet_root()``
 """
 
 from __future__ import annotations
