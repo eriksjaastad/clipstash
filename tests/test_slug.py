@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from helper.slug import MAX_SLUG_LEN, default_slug, slugify
+from helper.slug import MAX_SLUG_LEN, pick_slug, slugify
 
 
 def test_slugify_lowercases_and_dashes_spaces():
@@ -44,16 +44,5 @@ def test_slugify_custom_max_length():
     assert slugify("a b c d e f", max_length=5) == "a-b-c"
 
 
-def test_default_slug_prefers_title():
-    assert default_slug("How I edit", "youtube", "01JABC12DEFGHJKMNPQRSTVWXYZ") == "how-i-edit"
-
-
-def test_default_slug_falls_back_to_site_and_short_id():
-    assert (
-        default_slug("!!!", "tiktok", "01JABC12DEFGHJKMNPQRSTVWXYZ")
-        == "tiktok-01jabc12"
-    )
-
-
-def test_default_slug_never_returns_still_for_empty_site_id():
-    assert default_slug("", "", "") == "still"
+def test_pick_slug_last_resort_is_still():
+    assert pick_slug(None, "", "", "") == "still"

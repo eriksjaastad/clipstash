@@ -159,9 +159,9 @@ def test_write_packet_unknown_site_falls_back_to_generic(tmp_path):
     assert (tmp_path / "generic" / record["id"] / "weird-site.png").exists()
 
 
-def test_write_packet_name_override_is_always_reslugified(tmp_path):
-    record = new_record("Title", "https://example.com/1", site="youtube", name="already-clean")
-    written = write_packet(record, PNG_1PX, root=tmp_path, name="  My Raw! Name  ")
+def test_write_packet_reslugifies_the_record_name(tmp_path):
+    record = new_record("Title", "https://example.com/1", site="youtube")
+    written = write_packet(dict(record, name="  My Raw! Name  "), PNG_1PX, root=tmp_path)
     assert written["name"] == "my-raw-name"
     assert written["image"] == "my-raw-name.png"
     assert (tmp_path / "youtube" / record["id"] / "my-raw-name.png").exists()

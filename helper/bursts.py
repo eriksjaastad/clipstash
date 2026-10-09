@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from .coerce import optional_float, packet_fields
-from .packets import new_packet_id, new_record, now_iso, write_packet
+from .packets import new_record, now_iso, ulid, write_packet
 
 SESSION_TTL_SECONDS = 45 * 60  # 45 minutes, within the 30-60 min brief window
 META_FILENAME = "meta.json"
@@ -91,7 +91,7 @@ def create_burst(
 
     purge_expired_bursts()
 
-    session_id = session_id or new_packet_id()
+    session_id = session_id or ulid()
     directory = session_dir(session_id)
     directory.mkdir(parents=True, exist_ok=False)
 
@@ -160,7 +160,7 @@ def choose_frame(
         ),
         name=name,
     )
-    written = write_packet(record, frame_path.read_bytes(), root=root, name=name)
+    written = write_packet(record, frame_path.read_bytes(), root=root)
     shutil.rmtree(directory, ignore_errors=True)
     return written
 

@@ -23,9 +23,8 @@ Public API
     Normalize *text* into a web-safe slug; never returns an empty string.
 ``still_filename(slug)``
     Return ``"<slug>.png"``.
-``default_slug(title, site, packet_id)``
-    Title slug, or ``"<site>-<packet_id[:8]>"`` when the title is empty or
-    useless.
+``pick_slug(name, title, site, packet_id)``
+    The still slug: *name*, else *title*, else ``"<site>-<packet_id[:8]>"``.
 """
 
 from __future__ import annotations
@@ -71,18 +70,20 @@ def still_filename(slug: str) -> str:
     return f"{slug}.png"
 
 
-def default_slug(
+def pick_slug(
+    name: str | None,
     title: str | None,
     site: str = "generic",
     packet_id: str = "",
 ) -> str:
-    """Default still slug: the title slug, else ``<site>-<packet_id[:8]>``.
+    """Still slug: the type-in *name*, else *title*, else ``<site>-<packet_id[:8]>``.
 
-    The fallback keeps the human-facing file name readable and unique-ish
-    without ever falling back to a forever-``still.png``.
+    A name or title that slugifies to nothing is skipped. The last fallback
+    keeps the file name readable and unique-ish instead of a forever-``still.png``.
     """
-    slug = slugify(title, fallback="")
-    if slug:
-        return slug
+    for text in (name, title):
+        slug = slugify(text or "", fallback="")
+        if slug:
+            return slug
     short_id = str(packet_id or "")[:8]
     return slugify(f"{site}-{short_id}", fallback="still")
