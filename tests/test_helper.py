@@ -13,6 +13,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+import yaml
 from PIL import Image
 from support import PNG_1PX, PNG_1PX_B64, post_multipart_packet, request, server_url
 
@@ -105,6 +106,12 @@ def test_new_record_has_clipboard_pack():
     }
 
 
+def test_new_record_slug_skips_unusable_name_then_title():
+    assert new_record("How I edit", "https://example.com/1", name="!!!")["name"] == "how-i-edit"
+    record = new_record("你好", "https://example.com/1", site="tiktok", packet_id="01JABC12DEFG")
+    assert record["image"] == "tiktok-01jabc12.png"
+
+
 def test_new_record_requires_fields():
     with pytest.raises(ValueError):
         new_record("", "https://example.com")
@@ -127,6 +134,22 @@ def test_write_and_read_packet(tmp_path):
     assert reread["source_url"] == "https://example.com/v=1"
     assert reread["image"] == "demo.png"
     assert packet_dir(tmp_path, record["id"], site="youtube") == directory
+
+
+def test_write_packet_record_yaml_text(tmp_path):
+    record = new_record(
+        "Café edit", "https://example.com/v=1", site="youtube", timestamp_sec=12.5,
+        tags=["b-roll"], notes="keep", packet_id="01JPIN0000000000000000000A",
+        created_at="2026-10-08T00:00:00+00:00", name="My Still",
+    )
+    write_packet(record, PNG_1PX, root=tmp_path)
+    assert (tmp_path / "youtube" / record["id"] / "record.yaml").read_text(encoding="utf-8") == (
+        "id: 01JPIN0000000000000000000A\ncreated_at: '2026-10-08T00:00:00+00:00'\n"
+        "title: Café edit\nsource_url: https://example.com/v=1\npage_url: https://example.com/v=1\n"
+        "timestamp_sec: 12.5\nsite: youtube\ncapture_method: canvas\nimage: my-still.png\n"
+        "name: my-still\ntags:\n- b-roll\nnotes: keep\nclipboard:\n  title: Café edit\n"
+        "  url: https://example.com/v=1\n  text: 'Café edit\n\n    https://example.com/v=1'\n"
+    )
 
 
 def test_write_packet_unknown_site_falls_back_to_generic(tmp_path):
@@ -168,6 +191,15 @@ def test_read_record_missing_packet_fails_clearly(tmp_path):
         read_record("01JMISSING000000000000000", root=tmp_path)
 
 
+def test_bad_record_yaml_raises_on_read_and_is_skipped_by_list(tmp_path):
+    directory = tmp_path / "youtube" / "01JBAD"
+    directory.mkdir(parents=True)
+    (directory / "record.yaml").write_text("title: [unclosed\n", encoding="utf-8")
+    with pytest.raises(yaml.YAMLError):
+        read_record("01JBAD", root=tmp_path)
+    assert list_packets(root=tmp_path) == []
+
+
 def test_normalize_site_allows_only_adapter_ids():
     assert normalize_site("YouTube") == "youtube"
     assert normalize_site("x") == "x"
@@ -187,8 +219,9 @@ def test_list_and_export_csv(tmp_path):
     assert {s["site"] for s in summaries} == {"youtube", "tiktok"}
 
     csv_text = export_csv(root=tmp_path)
-    assert "id,created_at,title,source_url" in csv_text
-    assert {"name", "capture_method"} <= set(csv_text.splitlines()[0].split(","))
+    header = "id,created_at,title,source_url,page_url,timestamp_sec,site,capture_method,name,image"
+    assert csv_text.splitlines()[0] == header
+    assert list(summaries[0]) == header.split(",")
     assert "First" in csv_text and "Second" in csv_text
 
 
