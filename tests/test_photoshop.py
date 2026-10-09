@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 
@@ -64,9 +65,31 @@ def fake_run(stdout="", stderr="", returncode=0, raise_exc=None):
     return _run, calls
 
 
+def place_mocked(monkeypatch, tmp_path, run):
+    """place_in_photoshop on a real PNG, with macOS forced and subprocess.run faked."""
+    write_sample_png(tmp_path)
+    monkeypatch.setattr(photoshop, "is_macos", lambda: True)
+    monkeypatch.setattr(photoshop.subprocess, "run", run)
+    return place_in_photoshop(tmp_path / "still.png")
+
+
 # --------------------------------------------------------------------------
 # script generation / dry-run
 # --------------------------------------------------------------------------
+
+
+def test_placement_scripts_are_byte_identical_to_main():
+    # sha256 of each script on main @ 879a890 (git show 879a890:helper/photoshop.py),
+    # in fallback order. A change here changes what osascript runs.
+    digests = [
+        (name, hashlib.sha256(script.encode("utf-8")).hexdigest())
+        for name, script in photoshop._PLACEMENT_SCRIPTS
+    ]
+    assert digests == [
+        ("place", "d66d7c373857440ac9c8bf87399553ef6d547efa3443712c14e03a9c2d23781d"),
+        ("duplicate", "e3b9d1dc89f129f7f659c8ec84327575df49f7e5f3b22c41fed9c0bf595bc245"),
+        ("open", "3afa30a05c051842168e947d42394a52e898ad273432b463b588cd9207d1c12c"),
+    ]
 
 
 def test_scripts_receive_path_as_argv_not_interpolation():
@@ -300,6 +323,24 @@ def test_photoshop_not_installed_stderr(monkeypatch, tmp_path):
     assert result["ok"] is False
     assert result["reason"] == "photoshop_not_installed"
     assert len(calls) == 1
+
+
+def test_error_marker_is_osascript_failed_with_the_full_failure_shape(monkeypatch, tmp_path):
+    result = place_mocked(monkeypatch, tmp_path, fake_run(stdout="CLIPSTASH_ERROR: boom\n")[0])
+    assert list(result.items()) == [
+        ("ok", False),
+        ("error", "Photoshop place failed: boom"),
+        ("reason", "photoshop_osascript_failed"),
+        ("image", str(tmp_path / "still.png")),
+    ]
+
+
+def test_exit_zero_without_marker_is_unexpected_output(monkeypatch, tmp_path):
+    result = place_mocked(monkeypatch, tmp_path, fake_run(stdout="")[0])
+    assert (result["reason"], result["error"]) == (
+        "photoshop_unexpected_output",
+        "osascript returned no result marker (empty output)",
+    )
 
 
 # --------------------------------------------------------------------------
