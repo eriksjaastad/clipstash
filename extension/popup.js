@@ -51,10 +51,12 @@ async function refreshHealth() {
   setup.hidden = true;
 
   // No response or a messaging error reads as a helper that isn't running.
-  const health = await send({ type: "HEALTH" }).catch(() => null);
-  if (health && health.ok) {
+  // HEALTH answers { ok, helper, status }; `helper` is the /health body.
+  const response = await send({ type: "HEALTH" }).catch(() => null);
+  const helper = response && response.ok ? response.helper : null;
+  if (helper && helper.ok) {
     dot.className = "dot running";
-    text.textContent = `Helper running (v${health.version})`;
+    text.textContent = `Helper running (v${helper.version})`;
   } else {
     dot.className = "dot down";
     text.textContent = "Helper not running";

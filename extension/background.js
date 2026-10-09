@@ -50,15 +50,17 @@ async function handleMessage(message) {
   }
 }
 
-// The helper's /health body ({ ok, version }) whatever the HTTP status, or
-// { ok: false, error } when it is unreachable or doesn't answer JSON. The popup
-// shows the helper as running iff `ok` is truthy.
 async function checkHealth() {
   try {
     const response = await fetch(`${ClipStashHelper.BASE}/health`);
-    return await response.json();
+    const payload = await response.json();
+    return {
+      ok: true,
+      helper: payload,
+      status: response.status,
+    };
   } catch (error) {
-    return { ok: false, error: String(error) };
+    return { ok: false, helper: null, error: String(error) };
   }
 }
 

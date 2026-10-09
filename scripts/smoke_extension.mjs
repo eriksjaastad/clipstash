@@ -999,13 +999,16 @@ for (const [type, scriptResult] of [["SAVE_PACKET", CANVAS_STILL], ["BURST_PICK"
 }
 
 {
-  // The popup's helper check goes through background, which answers with the
-  // helper's /health body.
+  // The popup's helper check goes through background, which wraps the
+  // helper's /health body in { ok, helper, status }.
   const bg = loadBackground({ responses: { "/health": [200, { ok: true, version: "9.9.9" }] } });
   const health = await bg.send({ type: "HEALTH" });
   check(
-    bg.paths().join() === "/health" && health.ok === true && health.version === "9.9.9",
-    "background HEALTH returns the helper version from GET /health"
+    bg.paths().join() === "/health" &&
+      health.ok === true &&
+      health.helper.version === "9.9.9" &&
+      health.status === 200,
+    "background HEALTH returns the { ok, helper, status } envelope from GET /health"
   );
 }
 
