@@ -33,8 +33,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 async function handleMessage(message) {
   switch (message && message.type) {
     case "HEALTH":
-      // The helper's /health body ({ ok, version }) or { ok: false, error }.
-      return ClipStashHelper.fetchJson("/health");
+      return checkHealth();
     case "SAVE_PACKET":
       return captureAndSave(Boolean(message.placePhotoshop), cleanName(message.name));
     case "BURST_PICK":
@@ -48,6 +47,18 @@ async function handleMessage(message) {
       return getCapturedUrls();
     default:
       return { ok: false, error: `unknown message type: ${message && message.type}` };
+  }
+}
+
+// The helper's /health body ({ ok, version }) whatever the HTTP status, or
+// { ok: false, error } when it is unreachable or doesn't answer JSON. The popup
+// shows the helper as running iff `ok` is truthy.
+async function checkHealth() {
+  try {
+    const response = await fetch(`${ClipStashHelper.BASE}/health`);
+    return await response.json();
+  } catch (error) {
+    return { ok: false, error: String(error) };
   }
 }
 
@@ -138,17 +149,24 @@ async function injectCapture(files, injectionError, emptyError) {
   return { tab, captured };
 }
 
-// The snake_case video fields every helper POST body starts with. `method` is
-// the capture_method label; /bursts/ffmpeg passes none and the helper sets it.
+// The snake_case video fields every helper POST body starts with, sent as
+// captured. `method` is the capture_method label; /bursts/ffmpeg passes none
+// and the helper sets it.
 function packetFields(captured, method) {
   return {
     title: captured.title,
     source_url: captured.sourceUrl,
-    page_url: captured.pageUrl || captured.sourceUrl,
-    site: captured.site || "generic",
+    page_url: captured.pageUrl,
+    site: captured.site,
     timestamp_sec: captured.timestampSec,
     capture_method: method,
   };
+}
+
+// The page_url and site fallbacks the save paths apply. The tainted-burst
+// bodies (/bursts/ffmpeg and burst_visible_tab) send them as captured.
+function withDefaults(captured) {
+  return { ...captured, pageUrl: captured.pageUrl || captured.sourceUrl, site: captured.site || "generic" };
 }
 
 async function captureAndSave(placePhotoshop, name) {
@@ -168,10 +186,13 @@ async function captureAndSave(placePhotoshop, name) {
   // captureVisibleTab when the user invokes the extension). Its `cropRect`
   // (video CSS box × devicePixelRatio) is forwarded as `crop_rect` so the
   // helper crops the full-tab PNG to the video rectangle before saving.
+  // Only the visible-tab shot is cropped; a canvas save never sends crop_rect.
   let captureMethod = captured.captureMethod || "canvas";
   let imageDataUrl = captured.imageDataUrl;
+  let cropRect;
   if (captured.tainted) {
     captureMethod = "visible_tab";
+    cropRect = captured.cropRect;
     try {
       imageDataUrl = await captureVisibleTabPng(tab.windowId);
     } catch (error) {
@@ -182,12 +203,12 @@ async function captureAndSave(placePhotoshop, name) {
   }
 
   const payload = {
-    ...packetFields(captured, captureMethod),
+    ...packetFields(withDefaults(captured), captureMethod),
     image_base64: stripDataUrlPrefix(imageDataUrl || ""),
     photoshop: placePhotoshop,
   };
-  if (captured.cropRect) {
-    payload.crop_rect = captured.cropRect;
+  if (cropRect) {
+    payload.crop_rect = cropRect;
   }
   if (name) {
     payload.name = name;
@@ -205,8 +226,8 @@ async function captureBurstAndOpenPicker(placePhotoshop, name) {
     return failure;
   }
 
+  let fields;
   let frames;
-  let captureMethod;
 
   if (captured.tainted && !captured.ok) {
     // Canvas taint (e.g. googlevideo on YouTube). First try the helper's
@@ -219,14 +240,14 @@ async function captureBurstAndOpenPicker(placePhotoshop, name) {
     if (native) {
       return native;
     }
-    captureMethod = "burst_visible_tab";
     try {
       frames = [await captureVisibleTabPng(tab.windowId)];
     } catch (error) {
       return { ok: false, error: `visible-tab burst fallback failed: ${error}` };
     }
+    fields = packetFields(captured, "burst_visible_tab");
   } else if (captured.ok) {
-    captureMethod = captured.captureMethod || "burst_canvas";
+    fields = packetFields(withDefaults(captured), captured.captureMethod || "burst_canvas");
     frames = captured.frames || [];
   } else {
     return { ok: false, error: captured.error || "burst capture failed" };
@@ -236,7 +257,7 @@ async function captureBurstAndOpenPicker(placePhotoshop, name) {
     return { ok: false, error: "burst produced no frames" };
   }
 
-  const payload = { ...packetFields(captured, captureMethod), frames, photoshop: placePhotoshop };
+  const payload = { ...fields, frames, photoshop: placePhotoshop };
   if (name) {
     payload.name = name;
   }
@@ -275,7 +296,14 @@ async function tryNativeBurst(captured, placePhotoshop, name) {
   if (name) {
     payload.name = name;
   }
-  const body = await ClipStashHelper.postJson("/bursts/ffmpeg", payload);
+  let response;
+  try {
+    response = await ClipStashHelper.post("/bursts/ffmpeg", payload);
+  } catch (_error) {
+    // Helper unreachable: fall back without a warning.
+    return null;
+  }
+  const body = await ClipStashHelper.readJson(response);
   if (!body.ok) {
     console.warn("clipstash: native ffmpeg burst unavailable, falling back to visible_tab:", body.error);
     return null;
