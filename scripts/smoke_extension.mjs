@@ -13,7 +13,8 @@
 //   - urls.js canonicalizeVideoUrl + isGreenCheckSite (remake matching;
 //     X canonicalize exists for capture but is never a green-check site)
 //   - captured-overlay.js badge application on a YT grid and the X no-op gate
-//   - background.js SAVE_PACKET / BURST_PICK canvas, visible_tab and ffmpeg fallbacks
+//   - background.js SAVE_PACKET / BURST_PICK canvas, visible_tab and ffmpeg fallbacks,
+//     and HEALTH (the popup's helper check)
 //
 // Stubs the minimal DOM surface the scripts touch; no browser needed.
 
@@ -23,14 +24,31 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const adaptersSrc = readFileSync(join(root, "extension/lib/adapters.js"), "utf8");
-const frameSrc = readFileSync(join(root, "extension/lib/frame.js"), "utf8");
-const urlsSrc = readFileSync(join(root, "extension/lib/urls.js"), "utf8");
-const capturedOverlaySrc = readFileSync(join(root, "extension/lib/captured-overlay.js"), "utf8");
-const contentSrc = readFileSync(join(root, "extension/content.js"), "utf8");
-const burstSrc = readFileSync(join(root, "extension/lib/burst.js"), "utf8");
-const pickerBridgeSrc = readFileSync(join(root, "extension/lib/picker-bridge.js"), "utf8");
-const backgroundSrc = readFileSync(join(root, "extension/background.js"), "utf8");
+
+// Runs extension/<path> in the sandbox and returns the script's final value
+// (e.g. the object an IIFE assigns to globalThis.ClipStashAdapters).
+function runScript(sandbox, path) {
+  return runInNewContext(readFileSync(join(root, "extension", path), "utf8"), sandbox, { filename: path });
+}
+
+// A vm sandbox with the globals every script uses, plus `globals`.
+function makeSandbox(globals) {
+  const sandbox = { console, Promise, URL, ...globals };
+  createContext(sandbox);
+  return sandbox;
+}
+
+// A fetch stub that records each call in `fetched` and answers from
+// `responses`, keyed by "METHOD /path" or just "/path": [status, json].
+function stubFetch(responses, fetched) {
+  return async (url, options = {}) => {
+    const method = options.method || "GET";
+    const path = new URL(url).pathname;
+    fetched.push({ url, method, body: options.body ? JSON.parse(options.body) : null });
+    const [status, json] = responses[`${method} ${path}`] || responses[path] || [404, { ok: false, error: "not stubbed" }];
+    return { ok: status < 400, status, json: async () => json };
+  };
+}
 
 let failures = 0;
 function check(condition, label) {
@@ -68,35 +86,20 @@ function makeDocument({ title, ogTitle, tweetText, video }) {
   };
 }
 
+// A page sandbox for the capture scripts.
 function makeContext(url, doc) {
-  const sandbox = {
-    console,
+  return makeSandbox({
     setTimeout,
     clearTimeout,
     Date,
-    Promise,
-    URL,
     location: { href: url },
     document: doc,
     window: { devicePixelRatio: 2 },
-  };
-  createContext(sandbox);
-  return sandbox;
+  });
 }
 
-function loadAdapters(sandbox) {
-  // The script's final expression is the assignment to globalThis.ClipStashAdapters,
-  // so runInNewContext returns the adapter registry object directly.
-  return runInNewContext(adaptersSrc, sandbox, { filename: "adapters.js" });
-}
-
-function loadFrame(sandbox) {
-  return runInNewContext(frameSrc, sandbox, { filename: "frame.js" });
-}
-
-function loadUrls(sandbox) {
-  return runInNewContext(urlsSrc, sandbox, { filename: "urls.js" });
-}
+const loadAdapters = (sandbox) => runScript(sandbox, "lib/adapters.js");
+const loadUrls = (sandbox) => runScript(sandbox, "lib/urls.js");
 
 // -- adapter selection -----------------------------------------------------
 
@@ -293,45 +296,60 @@ function makeOverlayDocument(anchors) {
   };
 }
 
-{
-  const capturedAnchor = makeFakeAnchor("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
-  const notCapturedAnchor = makeFakeAnchor("https://www.youtube.com/watch?v=zzzzzzzzzzz");
-  const doc = makeOverlayDocument([capturedAnchor, notCapturedAnchor]);
+// Runs urls.js + captured-overlay.js on `href`, with a background that answers
+// GET_CAPTURED_URLS with `capturedUrls`. `page` supplies the DOM globals; the
+// X case passes none, so any DOM, observer or timer access throws.
+async function runOverlay(href, capturedUrls, page = {}) {
   const sentMessages = [];
-  let observerCount = 0;
-  class FakeMutationObserver {
-    constructor(callback) {
-      this.callback = callback;
-      observerCount += 1;
-    }
-    observe() {}
-    disconnect() {}
-  }
-  const sandbox = {
-    console,
-    Promise,
+  const sandbox = makeSandbox({
     Set,
-    URL,
-    setTimeout,
-    setInterval: () => 0,
-    location: { href: "https://www.youtube.com/results?search_query=banners", hostname: "www.youtube.com" },
-    document: doc,
-    window: { addEventListener() {} },
+    location: { href, hostname: new URL(href).hostname },
     chrome: {
       runtime: {
         sendMessage: async (message) => {
           sentMessages.push(message);
-          return { ok: true, urls: ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"] };
+          return { ok: true, urls: capturedUrls };
         },
       },
     },
-    MutationObserver: FakeMutationObserver,
-  };
+    ...page,
+  });
   loadUrls(sandbox);
-  runInNewContext(capturedOverlaySrc, sandbox, { filename: "captured-overlay.js" });
+  runScript(sandbox, "lib/captured-overlay.js");
   await new Promise((resolve) => setTimeout(resolve, 0));
+  return sentMessages;
+}
 
-  check(observerCount === 1, "overlay installs one MutationObserver on a green-check site");
+// The DOM globals of a grid page holding `anchors`; counts MutationObservers.
+function gridPage(anchors) {
+  const page = {
+    observerCount: 0,
+    setTimeout,
+    setInterval: () => 0,
+    document: makeOverlayDocument(anchors),
+    window: { addEventListener() {} },
+    MutationObserver: class {
+      constructor() {
+        page.observerCount += 1;
+      }
+      observe() {}
+      disconnect() {}
+    },
+  };
+  return page;
+}
+
+{
+  const capturedAnchor = makeFakeAnchor("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+  const notCapturedAnchor = makeFakeAnchor("https://www.youtube.com/watch?v=zzzzzzzzzzz");
+  const page = gridPage([capturedAnchor, notCapturedAnchor]);
+  const sentMessages = await runOverlay(
+    "https://www.youtube.com/results?search_query=banners",
+    ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
+    page
+  );
+
+  check(page.observerCount === 1, "overlay installs one MutationObserver on a green-check site");
   check(
     sentMessages.length >= 1 && sentMessages[0].type === "GET_CAPTURED_URLS",
     "overlay asks background for GET_CAPTURED_URLS"
@@ -350,36 +368,11 @@ function makeOverlayDocument(anchors) {
   // before canonicalize, otherwise badges never match absolute packet URLs.
   const capturedAnchor = makeFakeAnchor("/watch?v=dQw4w9WgXcQ");
   const notCapturedAnchor = makeFakeAnchor("/watch?v=zzzzzzzzzzz");
-  const doc = makeOverlayDocument([capturedAnchor, notCapturedAnchor]);
-  const sentMessages = [];
-  class FakeMutationObserver {
-    constructor() {}
-    observe() {}
-    disconnect() {}
-  }
-  const sandbox = {
-    console,
-    Promise,
-    Set,
-    URL,
-    setTimeout,
-    setInterval: () => 0,
-    location: { href: "https://www.youtube.com/@creator/videos", hostname: "www.youtube.com" },
-    document: doc,
-    window: { addEventListener() {} },
-    chrome: {
-      runtime: {
-        sendMessage: async (message) => {
-          sentMessages.push(message);
-          return { ok: true, urls: ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"] };
-        },
-      },
-    },
-    MutationObserver: FakeMutationObserver,
-  };
-  loadUrls(sandbox);
-  runInNewContext(capturedOverlaySrc, sandbox, { filename: "captured-overlay.js" });
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await runOverlay(
+    "https://www.youtube.com/@creator/videos",
+    ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
+    gridPage([capturedAnchor, notCapturedAnchor])
+  );
   check(
     capturedAnchor.getAttribute("data-clipstash-captured") === "1",
     "overlay badges relative /watch?v= hrefs against absolute packet URLs"
@@ -389,34 +382,15 @@ function makeOverlayDocument(anchors) {
 
 {
   // X / Twitter is out of scope: the overlay must no-op before touching the
-  // DOM, observers, or chrome messaging. The sandbox deliberately omits
-  // document / MutationObserver / setInterval, so any attempt to reach them
-  // throws and fails the test.
-  const sentMessages = [];
-  const sandbox = {
-    console,
-    Promise,
-    Set,
-    URL,
-    location: { href: "https://x.com/someone/status/1234567890123456789", hostname: "x.com" },
-    chrome: {
-      runtime: {
-        sendMessage: async (message) => {
-          sentMessages.push(message);
-          return { ok: true, urls: [] };
-        },
-      },
-    },
-  };
-  loadUrls(sandbox);
-  let threw = false;
+  // DOM, observers, or chrome messaging.
+  let sentMessages = null;
   try {
-    runInNewContext(capturedOverlaySrc, sandbox, { filename: "captured-overlay.js" });
+    sentMessages = await runOverlay("https://x.com/someone/status/1234567890123456789", []);
   } catch (_error) {
-    threw = true;
+    // Left null: the overlay reached for a page global it should never touch.
   }
-  check(threw === false, "overlay no-ops cleanly on x.com");
-  check(sentMessages.length === 0, "overlay never messages background on x.com");
+  check(sentMessages !== null, "overlay no-ops cleanly on x.com");
+  check(sentMessages?.length === 0, "overlay never messages background on x.com");
 }
 
 // -- content.js: canvas success and taint fallback ---------------------------
@@ -463,8 +437,8 @@ async function runContent(url, doc, now) {
   const sandbox = makeContext(url, doc);
   if (now) sandbox.Date = { now };
   loadAdapters(sandbox);
-  loadFrame(sandbox);
-  return runInNewContext(contentSrc, sandbox, { filename: "content.js" });
+  runScript(sandbox, "lib/frame.js");
+  return runScript(sandbox, "content.js");
 }
 
 {
@@ -589,8 +563,8 @@ function makeBurstDocument(video, { taint = false, throwNonTaint = false } = {})
 async function runBurst(url, doc) {
   const sandbox = makeContext(url, doc);
   loadAdapters(sandbox);
-  loadFrame(sandbox);
-  return runInNewContext(burstSrc, sandbox, { filename: "burst.js" });
+  runScript(sandbox, "lib/frame.js");
+  return runScript(sandbox, "lib/burst.js");
 }
 
 {
@@ -666,8 +640,7 @@ async function runBurst(url, doc) {
 {
   const listeners = new Map();
   const messages = [];
-  const sandbox = {
-    console,
+  const sandbox = makeSandbox({
     window: {
       addEventListener(name, fn) {
         listeners.set(name, fn);
@@ -685,9 +658,8 @@ async function runBurst(url, doc) {
         },
       },
     },
-  };
-  createContext(sandbox);
-  runInNewContext(pickerBridgeSrc, sandbox, { filename: "picker-bridge.js" });
+  });
+  runScript(sandbox, "lib/picker-bridge.js");
   check(listeners.has("clipstash:chosen"), "picker-bridge registers clipstash:chosen listener");
 
   const packet = {
@@ -710,7 +682,6 @@ async function runBurst(url, doc) {
 // -- options.js: loads config, saves new root via PUT /config ------------------
 
 {
-  const optionsSrc = readFileSync(join(root, "extension/options.js"), "utf8");
   const elements = {
     "current-root": { textContent: "" },
     "default-root": { textContent: "" },
@@ -724,43 +695,26 @@ async function runBurst(url, doc) {
       },
     },
   };
+  const config = {
+    ok: true,
+    packet_root: "/home/clipstash/Clipstash/packets",
+    default_root: "/home/clipstash/Clipstash/packets",
+    config_path: "/home/clipstash/Clipstash/config.json",
+  };
   const fetched = [];
-  const sandbox = {
-    console,
+  const sandbox = makeSandbox({
     document: {
       getElementById(id) {
         return elements[id] ?? null;
       },
     },
-    fetch: async (url, options = {}) => {
-      fetched.push({ url, options });
-      if (options.method === "PUT") {
-        const body = JSON.parse(options.body);
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            ok: true,
-            packet_root: `/resolved/${body.packet_root}`,
-            default_root: "/home/clipstash/Clipstash/packets",
-            config_path: "/home/clipstash/Clipstash/config.json",
-          }),
-        };
-      }
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          ok: true,
-          packet_root: "/home/clipstash/Clipstash/packets",
-          default_root: "/home/clipstash/Clipstash/packets",
-          config_path: "/home/clipstash/Clipstash/config.json",
-        }),
-      };
-    },
-  };
-  createContext(sandbox);
-  runInNewContext(optionsSrc, sandbox, { filename: "options.js" });
+    fetch: stubFetch(
+      { "GET /config": [200, config], "PUT /config": [200, { ...config, packet_root: "/resolved/~/new-packets" }] },
+      fetched
+    ),
+  });
+  runScript(sandbox, "lib/helper-api.js");
+  runScript(sandbox, "options.js");
   await new Promise((resolve) => setTimeout(resolve, 0));
 
   check(fetched.length >= 1 && fetched[0].url.endsWith("/config"), "options.js fetches /config on load");
@@ -773,9 +727,9 @@ async function runBurst(url, doc) {
   elements["packet-root"].value = "~/new-packets";
   await elements["config-form"].listeners.submit({ preventDefault() {} });
 
-  const put = fetched.find((entry) => entry.options.method === "PUT");
+  const put = fetched.find((entry) => entry.method === "PUT");
   check(Boolean(put) && put.url.endsWith("/config"), "options.js PUTs /config to save");
-  check(put && JSON.parse(put.options.body).packet_root === "~/new-packets", "options.js sends the new packet_root");
+  check(put && put.body.packet_root === "~/new-packets", "options.js sends the new packet_root");
   check(elements.status.textContent === "saved", "options.js reports saved");
 }
 
@@ -880,23 +834,14 @@ function loadBackground({ tabUrl = VIDEO_META.pageUrl, scriptResult, responses =
   const captureWindows = [];
   let pollStarts = 0;
   let listener = null;
-  const sandbox = {
-    console,
-    URL,
+  const sandbox = makeSandbox({
     setInterval: () => {
       pollStarts += 1;
       return 1;
     },
     clearInterval: () => {},
-    importScripts(path) {
-      runInNewContext(readFileSync(join(root, "extension", path), "utf8"), sandbox, { filename: path });
-    },
-    fetch: async (url, options = {}) => {
-      const body = options.body ? JSON.parse(options.body) : null;
-      fetched.push({ url, method: options.method || "GET", body });
-      const [status, json] = responses[new URL(url).pathname] || [404, { ok: false, error: "not stubbed" }];
-      return { ok: status < 400, status, json: async () => json };
-    },
+    importScripts: (...paths) => paths.forEach((path) => runScript(sandbox, path)),
+    fetch: stubFetch(responses, fetched),
     chrome: {
       runtime: {
         lastError: undefined,
@@ -926,9 +871,8 @@ function loadBackground({ tabUrl = VIDEO_META.pageUrl, scriptResult, responses =
         },
       },
     },
-  };
-  createContext(sandbox);
-  runInNewContext(backgroundSrc, sandbox, { filename: "background.js" });
+  });
+  runScript(sandbox, "background.js");
   return {
     send: (message) => new Promise((resolve) => listener(message, {}, resolve)),
     fetched,
@@ -1052,6 +996,17 @@ for (const [type, scriptResult] of [["SAVE_PACKET", CANVAS_STILL], ["BURST_PICK"
   check(bg.fetched.length === 0, `${label} never calls the helper`);
   check(bg.openedTabs.length === 0, `${label} opens no tab`);
   check(bg.pollStarts() === 0, `${label} starts no pending-history polling`);
+}
+
+{
+  // The popup's helper check goes through background, which answers with the
+  // helper's /health body.
+  const bg = loadBackground({ responses: { "/health": [200, { ok: true, version: "9.9.9" }] } });
+  const health = await bg.send({ type: "HEALTH" });
+  check(
+    bg.paths().join() === "/health" && health.ok === true && health.version === "9.9.9",
+    "background HEALTH returns the helper version from GET /health"
+  );
 }
 
 if (failures > 0) {
