@@ -6,11 +6,29 @@ A packet is the source of truth for one capture:
       <slug>.png
       record.yaml
 
-`record.yaml` follows PLAN.md §2. The still file is named from the slugified
-video title (or the popup type-in override) via `helper.slug`; the record
-carries that choice in ``image`` (``<slug>.png``) and ``name`` (the slug).
-Packets are grouped by site folder whose name matches the adapter ids:
-``youtube``, ``tiktok``, ``instagram``, ``x``, or ``generic``.
+``<site>`` is an adapter id from ``SITE_IDS``; anything else is stored under
+``generic``. ``<slug>`` is the popup type-in name, else the video title, else
+``<site>-<id[:8]>`` (``helper.slug.pick_slug``). ``record.yaml`` holds, in
+this key order::
+
+    id: 01J…                      # ULID
+    created_at: '2026-09-25T…'    # UTC ISO-8601
+    title: How I edit thumbnails
+    source_url: https://www.youtube.com/watch?v=…
+    page_url: https://www.youtube.com/watch?v=…   # defaults to source_url
+    timestamp_sec: 142.5          # null when unknown
+    site: youtube
+    capture_method: canvas        # one of CAPTURE_METHODS
+    image: how-i-edit-thumbnails.png
+    name: how-i-edit-thumbnails   # the slug
+    tags: []
+    notes: ''
+    clipboard:                    # what the extension copies
+      title: How I edit thumbnails
+      url: https://www.youtube.com/watch?v=…
+      text: "How I edit thumbnails\\nhttps://www.youtube.com/watch?v=…"
+
+``GET /packets`` and the CSV export carry only ``SUMMARY_FIELDS``.
 
 Packets written before site folders shipped live in a legacy flat layout:
 
@@ -40,13 +58,22 @@ from typing import Any
 
 import yaml
 
-from .slug import default_slug, slugify, still_filename
+from .slug import pick_slug, still_filename
 
 IMAGE_FILENAME = "still.png"
 RECORD_FILENAME = "record.yaml"
 
 #: Adapter ids; these are the only allowed site folder names under the root.
 SITE_IDS = ("youtube", "tiktok", "instagram", "x", "generic")
+
+#: Known ``capture_method`` values (not validated): single captures, then bursts.
+CAPTURE_METHODS = ("canvas", "visible_tab", "burst_canvas", "burst_ffmpeg", "burst_visible_tab")
+
+#: Record fields in ``GET /packets`` summaries and CSV columns, in order.
+SUMMARY_FIELDS = (
+    "id", "created_at", "title", "source_url", "page_url",
+    "timestamp_sec", "site", "capture_method", "name", "image",
+)
 
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
@@ -60,10 +87,6 @@ def ulid() -> str:
     for shift in range(25, -1, -1):
         chars.append(_CROCKFORD[(value >> (shift * 5)) & 0x1F])
     return "".join(chars)
-
-
-def new_packet_id() -> str:
-    return ulid()
 
 
 def now_iso() -> str:
@@ -108,22 +131,6 @@ def record_path(directory: Path) -> Path:
     return directory / RECORD_FILENAME
 
 
-def image_path(directory: Path) -> Path:
-    """Legacy still path for a flat packet directory (``still.png``)."""
-    return directory / IMAGE_FILENAME
-
-
-def _slug_for(
-    title: str,
-    site: str,
-    packet_id: str,
-    name: str | None = None,
-) -> str:
-    """Pick the still slug: type-in override > title > ``<site>-<id[:8]>``."""
-    candidate = str(name or "").strip() or title
-    return slugify(candidate, fallback="") or default_slug(title, site, packet_id)
-
-
 def new_record(
     title: str,
     source_url: str,
@@ -137,24 +144,10 @@ def new_record(
     capture_method: str = "canvas",
     name: str | None = None,
 ) -> dict[str, Any]:
-    """Build a packet record dict from PLAN.md §2.
+    """Build a packet record dict (schema in the module docstring).
 
-    `capture_method` records how the still was produced. Single captures use
-    `canvas` (in-page video frame draw) or `visible_tab`
-    (chrome.tabs.captureVisibleTab fallback for tainted canvases). Burst
-    sessions use `burst_canvas` (in-page canvas stepping), `burst_ffmpeg`
-    (helper-native multi-frame extraction from the video's media URL via
-    ffmpeg), or `burst_visible_tab` (single visible-tab fallback when the
-    canvas is tainted and the media cannot be fetched / ffmpeg is missing).
-    A `visible_tab` still may be cropped to
-    the video element's on-screen rectangle before it is written when the
-    request carries a `crop_rect` (see helper.crop); the field itself is
-    ephemeral and never persisted here.
-
-    `name` is the optional popup type-in override for the still file name.
-    It is slugified here (and re-slugified in `write_packet`); when it is
-    empty the slugified title is used, and when that is empty or unusable the
-    fallback is ``<site>-<id[:8]>`` so the still is never a forever-``still.png``.
+    `capture_method` is normally one of ``CAPTURE_METHODS``. `name` is the
+    optional popup type-in for the still name; see ``helper.slug.pick_slug``.
     """
     if not title or not title.strip():
         raise ValueError("title is required")
@@ -164,9 +157,9 @@ def new_record(
     source_url = source_url.strip()
     page_url = (page_url or source_url).strip()
 
-    packet_id = packet_id or new_packet_id()
+    packet_id = packet_id or ulid()
     site = normalize_site(site)
-    slug = _slug_for(title, site, packet_id, name)
+    slug = pick_slug(name, title, site, packet_id)
     return {
         "id": packet_id,
         "created_at": created_at or now_iso(),
@@ -206,25 +199,18 @@ def write_packet(
     record: dict[str, Any],
     image_bytes: bytes,
     root: str | Path | None = None,
-    *,
-    name: str | None = None,
 ) -> dict[str, Any]:
     """Persist a packet: ``<root>/<site>/<id>/{<slug>.png,record.yaml}``.
 
-    `name` is an optional type-in override from the client; it is always
-    re-slugified here, so the server never trusts a client-supplied file
-    name. Without an override the record's existing ``name`` (or title) is
-    slugified again. Returns the record as written (record.yaml is the source
-    of truth).
+    The record's ``name`` (or title) is always re-slugified here, so the
+    server never trusts a client-supplied file name. Returns the record as
+    written (record.yaml is the source of truth).
     """
     _validate_record(record)
     packet_id = str(record["id"])
     site = normalize_site(record.get("site"))
     record["site"] = site
-    title = str(record.get("title") or "")
-    if name is None:
-        name = str(record.get("name") or "") or None
-    slug = _slug_for(title, site, packet_id, name)
+    slug = pick_slug(record.get("name"), record.get("title"), site, packet_id)
     filename = still_filename(slug)
     record["name"] = slug
     record["image"] = filename
@@ -255,10 +241,13 @@ def find_packet_dir(packet_id: str, root: str | Path | None = None) -> Path:
     raise FileNotFoundError(f"no packet with id {packet_id!r} under {base}")
 
 
-def read_record(packet_id: str, root: str | Path | None = None) -> dict[str, Any]:
-    path = record_path(find_packet_dir(packet_id, root))
+def _load_record(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as fh:
-        record = yaml.safe_load(fh) or {}
+        return yaml.safe_load(fh) or {}
+
+
+def read_record(packet_id: str, root: str | Path | None = None) -> dict[str, Any]:
+    record = _load_record(record_path(find_packet_dir(packet_id, root)))
     record.setdefault("id", packet_id)
     record.setdefault("site", "generic")
     return record
@@ -278,17 +267,10 @@ def packet_image_path(
 
 
 def summarize(record: dict[str, Any]) -> dict[str, Any]:
+    # ``id`` is required (KeyError when missing); the other fields default to None.
     return {
-        "id": record["id"],
-        "created_at": record.get("created_at"),
-        "title": record.get("title"),
-        "source_url": record.get("source_url"),
-        "page_url": record.get("page_url"),
-        "timestamp_sec": record.get("timestamp_sec"),
-        "site": record.get("site"),
-        "capture_method": record.get("capture_method"),
-        "name": record.get("name"),
-        "image": record.get("image"),
+        field: record[field] if field == "id" else record.get(field)
+        for field in SUMMARY_FIELDS
     }
 
 
@@ -316,10 +298,8 @@ def list_packets(root: str | Path | None = None) -> list[dict[str, Any]]:
                 directories.append(directory)
 
     for directory in directories:
-        path = record_path(directory)
         try:
-            with path.open("r", encoding="utf-8") as fh:
-                record = yaml.safe_load(fh) or {}
+            record = _load_record(record_path(directory))
             record.setdefault("id", directory.name)
             summaries.append(summarize(record))
         except (OSError, yaml.YAMLError):
@@ -330,21 +310,9 @@ def list_packets(root: str | Path | None = None) -> list[dict[str, Any]]:
 
 def export_csv(root: str | Path | None = None) -> str:
     """CSV of packets (derived export, never the source of truth)."""
-    columns = [
-        "id",
-        "created_at",
-        "title",
-        "source_url",
-        "page_url",
-        "timestamp_sec",
-        "site",
-        "capture_method",
-        "name",
-        "image",
-    ]
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(columns)
+    writer.writerow(SUMMARY_FIELDS)
     for summary in list_packets(root):
-        writer.writerow([summary.get(column, "") for column in columns])
+        writer.writerow([summary.get(column, "") for column in SUMMARY_FIELDS])
     return output.getvalue()

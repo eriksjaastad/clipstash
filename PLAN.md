@@ -16,38 +16,7 @@
 
 ## 2. Core packet (source of truth)
 
-Store each capture as a folder (or flat pair) plus a YAML/JSON record:
-
-```yaml
-id: "01J…"                    # ulid or uuid
-created_at: "2026-09-25T…"
-title: "How I edit thumbnails"
-source_url: "https://www.youtube.com/watch?v=…"
-page_url: "https://www.youtube.com/watch?v=…"   # may equal source_url
-timestamp_sec: 142.5          # optional, when known
-site: youtube                 # adapter id
-capture_method: canvas        # canvas | visible_tab (taint fallback)
-image: how-i-edit-thumbnails.png  # slugified title (or popup type-in)
-name: how-i-edit-thumbnails   # slug, repeated for convenience
-thumb: how-i-edit-thumbnails.thumb.jpg  # optional small preview
-tags: []
-notes: ""
-clipboard:
-  title: "How I edit thumbnails"
-  url: "https://www.youtube.com/watch?v=…"
-  text: "How I edit thumbnails\nhttps://www.youtube.com/watch?v=…"
-```
-
-**On disk (v1 default):**
-
-```
-~/Clipstash/packets/<site>/<id>/
-  <slug>.png       # slugified video title (or popup type-in), e.g. how-i-edit-thumbnails.png
-  record.yaml      # image + name carry the slug; page_url/source_url kept for remakes
-```
-
-`<site>` matches adapter ids: `youtube` | `tiktok` | `instagram` | `x` | `generic`.
-Older flat packets (`~/Clipstash/packets/<id>/still.png`) still read/list for remakes.
+The record.yaml schema and on-disk layout live in the `helper/packets.py` module docstring.
 
 Configurable root via extension options / helper config.
 
