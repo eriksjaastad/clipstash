@@ -21,7 +21,7 @@
         "*://*.tiktok.com/*",
         "*://*.instagram.com/*"
       ],
-      "js": ["lib/urls.js", "lib/adapters.js", "lib/captured-overlay.js"],
+      "js": ["lib/urls.js", "lib/captured-overlay.js"],
       "css": ["lib/captured-overlay.css"],
       "run_at": "document_idle"
     }
