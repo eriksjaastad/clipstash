@@ -55,6 +55,10 @@ class FFmpegBurstError(Exception):
     """Raised when a native ffmpeg burst cannot be produced."""
 
 
+class FFmpegMissingError(FFmpegBurstError):
+    """ffmpeg is not on PATH (the server answers 503 rather than 502)."""
+
+
 def ffmpeg_available() -> bool:
     """True when an ``ffmpeg`` binary is on PATH."""
     return shutil.which("ffmpeg") is not None
@@ -68,8 +72,26 @@ def ytdlp_available() -> bool:
 def _ffmpeg_path() -> str:
     path = shutil.which("ffmpeg")
     if not path:
-        raise FFmpegBurstError("ffmpeg not found on PATH (brew install ffmpeg)")
+        raise FFmpegMissingError("ffmpeg not found on PATH (brew install ffmpeg)")
     return path
+
+
+def _run_tool(command: list[str], timeout: int, timed_out: str, failed: str) -> None:
+    """Run *command* with a hard *timeout*. Raises :class:`FFmpegBurstError`
+    with *timed_out*, or with *failed* plus the stderr tail on a nonzero exit."""
+    try:
+        completed = subprocess.run(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise FFmpegBurstError(timed_out) from exc
+    if completed.returncode != 0:
+        stderr = completed.stderr.decode("utf-8", "replace").strip()
+        raise FFmpegBurstError(f"{failed}: {stderr[-500:]}")
 
 
 def _coerce_timestamp(timestamp_sec: float | None) -> float:
@@ -103,16 +125,17 @@ def extract_burst_pngs(
     *,
     step: float = BURST_STEP,
     n: int = BURST_N,
+    ffmpeg: str | None = None,
 ) -> list[bytes]:
     """Seek ``±n*step`` around *timestamp_sec*; return PNG bytes per frame.
 
     Runs one ffmpeg invocation per seek position (``-ss`` before ``-i``, one
     video frame, PNG output) inside a private temp dir that is always
-    removed. Raises :class:`FFmpegBurstError` when ffmpeg is missing, times
-    out, or produces no frame.
+    removed. *ffmpeg* is the binary path when the caller already resolved it.
+    Raises :class:`FFmpegBurstError` when ffmpeg is missing, times out, or
+    produces no frame.
     """
-    if not ffmpeg_available():
-        raise FFmpegBurstError("ffmpeg not found on PATH (brew install ffmpeg)")
+    ffmpeg = ffmpeg or _ffmpeg_path()
     media = Path(media_path)
     if not media.is_file():
         raise FFmpegBurstError(f"media file not found: {media}")
@@ -121,7 +144,6 @@ def extract_burst_pngs(
     if not targets:
         raise FFmpegBurstError("burst requires at least one seek target")
 
-    ffmpeg = _ffmpeg_path()
     workdir = Path(tempfile.mkdtemp(prefix=TEMP_PREFIX))
     try:
         frames: list[bytes] = []
@@ -140,23 +162,12 @@ def extract_burst_pngs(
                 "1",
                 str(out_path),
             ]
-            try:
-                completed = subprocess.run(
-                    command,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.PIPE,
-                    timeout=FFMPEG_TIMEOUT_SEC,
-                    check=False,
-                )
-            except subprocess.TimeoutExpired as exc:
-                raise FFmpegBurstError(
-                    f"ffmpeg timed out after {FFMPEG_TIMEOUT_SEC}s at {target:.3f}s"
-                ) from exc
-            if completed.returncode != 0:
-                stderr = completed.stderr.decode("utf-8", "replace").strip()
-                raise FFmpegBurstError(
-                    f"ffmpeg failed to extract frame at {target:.3f}s: {stderr[-500:]}"
-                )
+            _run_tool(
+                command,
+                FFMPEG_TIMEOUT_SEC,
+                f"ffmpeg timed out after {FFMPEG_TIMEOUT_SEC}s at {target:.3f}s",
+                f"ffmpeg failed to extract frame at {target:.3f}s",
+            )
             if not out_path.exists() or out_path.stat().st_size == 0:
                 raise FFmpegBurstError(f"ffmpeg produced no frame at {target:.3f}s")
             frames.append(out_path.read_bytes())
@@ -165,12 +176,12 @@ def extract_burst_pngs(
         shutil.rmtree(workdir, ignore_errors=True)
 
 
-def _prefer_ytdlp(parsed, site: str) -> bool:
-    """True when the URL should go through yt-dlp (YouTube / googlevideo)."""
+def _is_youtube(url: str, site: str) -> bool:
+    """True when *site* is ``youtube`` or *url*'s host is YouTube / youtu.be."""
     if str(site or "").strip().lower() == "youtube":
         return True
-    host = (parsed.hostname or "").lower()
-    return "youtube" in host or "googlevideo" in host or host.endswith("youtu.be")
+    host = (urlparse(url).hostname or "").lower()
+    return "youtube" in host or host.endswith("youtu.be")
 
 
 def _ytdlp_fetch_url(media_url: str, page_url: str | None, site: str) -> str:
@@ -182,16 +193,8 @@ def _ytdlp_fetch_url(media_url: str, page_url: str | None, site: str) -> str:
     to *media_url*.
     """
     page = str(page_url or "").strip()
-    if page:
-        parsed_page = urlparse(page)
-        if parsed_page.scheme in ("http", "https"):
-            host = (parsed_page.hostname or "").lower()
-            if (
-                "youtube" in host
-                or host.endswith("youtu.be")
-                or str(site or "").strip().lower() == "youtube"
-            ):
-                return page
+    if page and urlparse(page).scheme in ("http", "https") and _is_youtube(page, site):
+        return page
     return media_url
 
 
@@ -210,19 +213,7 @@ def _download_with_ytdlp(media_url: str, tmpdir: Path) -> Path:
         "--",
         media_url,
     ]
-    try:
-        completed = subprocess.run(
-            command,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            timeout=YTDLP_TIMEOUT_SEC,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise FFmpegBurstError(f"yt-dlp timed out after {YTDLP_TIMEOUT_SEC}s") from exc
-    if completed.returncode != 0:
-        stderr = completed.stderr.decode("utf-8", "replace").strip()
-        raise FFmpegBurstError(f"yt-dlp failed: {stderr[-500:]}")
+    _run_tool(command, YTDLP_TIMEOUT_SEC, f"yt-dlp timed out after {YTDLP_TIMEOUT_SEC}s", "yt-dlp failed")
     files = [
         path
         for path in tmpdir.iterdir()
@@ -288,7 +279,10 @@ def fetch_media_to_temp(
 
     tmpdir = Path(tempfile.mkdtemp(prefix=TEMP_PREFIX))
     try:
-        if _prefer_ytdlp(parsed, site) and ytdlp_available():
+        # googlevideo (YouTube's media CDN) also goes through yt-dlp, though
+        # _ytdlp_fetch_url does not count it as a YouTube page.
+        googlevideo = "googlevideo" in (parsed.hostname or "").lower()
+        if (_is_youtube(media_url, site) or googlevideo) and ytdlp_available():
             return _download_with_ytdlp(
                 _ytdlp_fetch_url(media_url, page_url, site), tmpdir
             )
@@ -305,11 +299,16 @@ def burst_frames_from_url(
     site: str = "generic",
     page_url: str | None = None,
 ) -> list[bytes]:
-    """fetch → extract → cleanup temp download → return PNG list (len >= 1)."""
+    """fetch → extract → cleanup temp download → return PNG list (len >= 1).
+
+    ffmpeg is looked up once, before any download, so a missing ffmpeg
+    raises :class:`FFmpegMissingError` without fetching anything.
+    """
+    ffmpeg = _ffmpeg_path()
     media_path = fetch_media_to_temp(media_url, site=site, page_url=page_url)
     tmpdir = media_path.parent
     try:
-        frames = extract_burst_pngs(media_path, timestamp_sec)
+        frames = extract_burst_pngs(media_path, timestamp_sec, ffmpeg=ffmpeg)
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
     if not frames:

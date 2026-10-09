@@ -863,7 +863,6 @@ def test_burst_list_timestamp_is_a_last_resort_500(server):
 
 
 def test_ffmpeg_burst_forces_capture_method_and_metadata_fallbacks(server, monkeypatch):
-    monkeypatch.setattr("helper.server.ffmpeg_available", lambda: True)
     monkeypatch.setattr("helper.server.burst_frames_from_url", lambda *args, **kwargs: [PNG_1PX])
     payload = {"media_url": "https://example.com/v.mp4", "source_url": "https://example.com/s"}
     payload["capture_method"] = "burst_canvas"
