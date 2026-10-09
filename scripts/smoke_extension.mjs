@@ -1012,6 +1012,36 @@ for (const [type, scriptResult] of [["SAVE_PACKET", CANVAS_STILL], ["BURST_PICK"
   );
 }
 
+// -- popup.js: refreshHealth renders background's HEALTH envelope --------------
+
+async function popupHealth(envelope) {
+  const elements = {};
+  const sandbox = makeSandbox({
+    document: {
+      getElementById: (id) => (elements[id] ??= { className: "", textContent: "", hidden: false }),
+      addEventListener() {},
+    },
+    chrome: { runtime: { sendMessage: async () => envelope } },
+  });
+  runScript(sandbox, "lib/helper-api.js");
+  runScript(sandbox, "popup.js");
+  await sandbox.refreshHealth();
+  return elements;
+}
+
+{
+  const up = await popupHealth({ ok: true, helper: { ok: true, version: "9.9.9" }, status: 200 });
+  check(
+    up["helper-text"].textContent === "Helper running (v9.9.9)" && up["helper-dot"].className === "dot running",
+    "popup refreshHealth shows the running helper's version from the HEALTH envelope"
+  );
+  const down = await popupHealth({ ok: false, helper: null, error: "x" });
+  check(
+    down["helper-text"].textContent === "Helper not running" && down["helper-setup"].hidden === false,
+    "popup refreshHealth shows not running with setup visible on a failed HEALTH"
+  );
+}
+
 if (failures > 0) {
   console.error(`\n${failures} smoke check(s) failed`);
   process.exit(1);
