@@ -30,14 +30,14 @@ def server_url(httpd, path: str) -> str:
     return f"http://{host}:{port}{path}"
 
 
-def post_multipart_packet(httpd, image: bytes = PNG_1PX, **fields: str):
-    """POST /packets as multipart/form-data: text *fields* plus an ``image`` file part."""
+def post_multipart_packet(httpd, image: bytes = PNG_1PX, path="/packets", part="image", **fields: str):
+    """POST *path* as multipart/form-data: text *fields* plus one *part* file part."""
     boundary = "clipstash-test-boundary"
     text = "".join(
         f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'
         for name, value in fields.items()
     )
-    part = f'--{boundary}\r\nContent-Disposition: form-data; name="image"; filename="still.png"\r\n\r\n'
+    part = f'--{boundary}\r\nContent-Disposition: form-data; name="{part}"; filename="still.png"\r\n\r\n'
     body = (text + part).encode("utf-8") + image + f"\r\n--{boundary}--\r\n".encode("utf-8")
     headers = {"Content-Type": f"multipart/form-data; boundary={boundary}"}
-    return request(server_url(httpd, "/packets"), data=body, method="POST", headers=headers)
+    return request(server_url(httpd, path), data=body, method="POST", headers=headers)

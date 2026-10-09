@@ -337,6 +337,16 @@ def test_post_packet_visible_tab_crop_rect_crops_still(server, tmp_path):
     assert "crop_rect" not in read_record(record["id"], root=tmp_path)
 
 
+def test_post_packet_visible_tab_without_crop_rect_keeps_full_still(server, tmp_path):
+    png = make_png_with_green_region()
+    payload = make_payload(capture_method="visible_tab", image_base64=base64.b64encode(png).decode("ascii"))
+    status, _, body = send_json(server, "/packets", payload)
+    assert status == 201
+    record = json.loads(body)["packet"]
+    still = (tmp_path / record["site"] / record["id"] / record["image"]).read_bytes()
+    assert png_size_and_pixel(still, (0, 0)) == ((200, 100), RED)
+
+
 def test_post_packet_multipart(server, tmp_path):
     crop_rect = {"x": 10, "y": 20, "width": 40, "height": 30, "dpr": 1}
     status, _, body = post_multipart_packet(
@@ -790,6 +800,15 @@ def test_burst_visible_tab_crop_rect_crops_frame_and_chosen_packet(server, tmp_p
     ).read_bytes()
     assert png_size_and_pixel(still, (0, 0)) == ((40, 30), GREEN)
     assert read_record(packet["id"], root=tmp_path)["capture_method"] == "burst_visible_tab"
+
+
+def test_burst_multipart_one_frame_file_201(server):
+    status, _, body = post_multipart_packet(
+        server, path="/bursts", part="frame_0", title="T", source_url="https://example.com/1"
+    )
+    assert status == 201
+    payload = json.loads(body)
+    assert payload["session_id"] and payload["frame_count"] == 1
 
 
 def test_burst_requires_frames(server):
