@@ -96,7 +96,6 @@ Save works but ``photoshop.method: "open"``
 
 from __future__ import annotations
 
-import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -113,13 +112,11 @@ MARKER_NO_DOCUMENT = "CLIPSTASH_NO_DOCUMENT"
 MARKER_ERROR = "CLIPSTASH_ERROR:"
 MARKER_NO_ARG = "CLIPSTASH_NO_ARG"
 
-# Tuple of (name, script_text). Order matters: the first script that compiles
-# against the installed Photoshop dictionary and produces a definitive result
-# wins; compile failures move on to the next script.
-_PLACEMENT_SCRIPTS: tuple[tuple[str, str], ...] = (
-    (
-        "place",
-        f"""on run argv
+
+def _placement_script(body: str) -> str:
+    """Wrap one method's ``tell`` body (newline-terminated lines) in the shared
+    argv check, POSIX file, and is-running skeleton."""
+    return f"""on run argv
 \tif (count of argv) < 1 then
 \t\treturn "{MARKER_NO_ARG}"
 \tend if
@@ -127,7 +124,20 @@ _PLACEMENT_SCRIPTS: tuple[tuple[str, str], ...] = (
 \tset imageFile to POSIX file imagePath
 \tif application id "{PHOTOSHOP_BUNDLE_ID}" is running then
 \t\ttell application id "{PHOTOSHOP_BUNDLE_ID}"
-\t\t\ttry
+{body}\t\tend tell
+\telse
+\t\treturn "{MARKER_NOT_RUNNING}"
+\tend if
+end run"""
+
+
+# Tuple of (name, script_text). Order matters: the first script that compiles
+# against the installed Photoshop dictionary and produces a definitive result
+# wins; compile failures move on to the next script.
+_PLACEMENT_SCRIPTS: tuple[tuple[str, str], ...] = (
+    (
+        "place",
+        _placement_script(f"""\t\t\ttry
 \t\t\t\tset docRef to current document
 \t\t\ton error errMsg
 \t\t\t\treturn "{MARKER_NO_DOCUMENT}: " & errMsg
@@ -138,23 +148,11 @@ _PLACEMENT_SCRIPTS: tuple[tuple[str, str], ...] = (
 \t\t\t\treturn "{MARKER_ERROR} " & errMsg
 \t\t\tend try
 \t\t\treturn "{MARKER_PLACED}"
-\t\tend tell
-\telse
-\t\treturn "{MARKER_NOT_RUNNING}"
-\tend if
-end run""",
+"""),
     ),
     (
         "duplicate",
-        f"""on run argv
-\tif (count of argv) < 1 then
-\t\treturn "{MARKER_NO_ARG}"
-\tend if
-\tset imagePath to item 1 of argv
-\tset imageFile to POSIX file imagePath
-\tif application id "{PHOTOSHOP_BUNDLE_ID}" is running then
-\t\ttell application id "{PHOTOSHOP_BUNDLE_ID}"
-\t\t\ttry
+        _placement_script(f"""\t\t\ttry
 \t\t\t\tset targetDoc to current document
 \t\t\ton error errMsg
 \t\t\t\treturn "{MARKER_NO_DOCUMENT}: " & errMsg
@@ -167,33 +165,17 @@ end run""",
 \t\t\t\treturn "{MARKER_ERROR} " & errMsg
 \t\t\tend try
 \t\t\treturn "{MARKER_PLACED}"
-\t\tend tell
-\telse
-\t\treturn "{MARKER_NOT_RUNNING}"
-\tend if
-end run""",
+"""),
     ),
     (
         "open",
-        f"""on run argv
-\tif (count of argv) < 1 then
-\t\treturn "{MARKER_NO_ARG}"
-\tend if
-\tset imagePath to item 1 of argv
-\tset imageFile to POSIX file imagePath
-\tif application id "{PHOTOSHOP_BUNDLE_ID}" is running then
-\t\ttell application id "{PHOTOSHOP_BUNDLE_ID}"
-\t\t\ttry
+        _placement_script(f"""\t\t\ttry
 \t\t\t\topen imageFile showing dialogs never
 \t\t\ton error errMsg
 \t\t\t\treturn "{MARKER_ERROR} " & errMsg
 \t\t\tend try
 \t\t\treturn "{MARKER_OPENED}"
-\t\tend tell
-\telse
-\t\treturn "{MARKER_NOT_RUNNING}"
-\tend if
-end run""",
+"""),
     ),
 )
 
@@ -207,36 +189,9 @@ def env_photoshop_enabled() -> bool:
     return env_flag("CLIPSTASH_PHOTOSHOP")
 
 
-def build_place_script() -> str:
-    """AppleScript using the legacy ``place`` verb (older Photoshop)."""
-    return _script_by_name("place")
-
-
-def build_duplicate_script() -> str:
-    """AppleScript that opens the PNG and duplicates its layers into the active doc."""
-    return _script_by_name("duplicate")
-
-
-def build_open_script() -> str:
-    """AppleScript fallback that simply opens the PNG as a new document."""
-    return _script_by_name("open")
-
-
-def _script_by_name(name: str) -> str:
-    for script_name, script in _PLACEMENT_SCRIPTS:
-        if script_name == name:
-            return script
-    raise KeyError(name)
-
-
-def scripts_for_placement() -> list[dict[str, str]]:
-    """All candidate scripts in fallback order (useful for dry-run output)."""
-    return [{"name": name, "script": script} for name, script in _PLACEMENT_SCRIPTS]
-
-
-def _command_for(script: str, image_path: Path) -> list[str]:
-    """osascript invocation for a script; image path travels as an argv item."""
-    return ["osascript", "-e", script, str(image_path)]
+def _fail(reason: str, error: str, image_path: Path) -> dict[str, Any]:
+    """The one failure shape every reason code is returned in."""
+    return {"ok": False, "error": error, "reason": reason, "image": str(image_path)}
 
 
 def _is_compile_failure(stderr: str) -> bool:
@@ -288,45 +243,34 @@ def _classify_script_result(
                 "note": "opened as a new document (Photoshop version has no place/duplicate path)",
             }
         if MARKER_NOT_RUNNING in stdout:
-            return {
-                "ok": False,
-                "error": "Photoshop is not running",
-                "reason": "photoshop_not_running",
-                "image": str(image_path),
-            }
+            return _fail("photoshop_not_running", "Photoshop is not running", image_path)
         if MARKER_NO_DOCUMENT in stdout:
             detail = stdout.split(":", 1)[1].strip() if ":" in stdout else ""
             reason = "photoshop_no_document"
             if _looks_like_timeout(detail):
                 reason = "photoshop_timeout"
-            return {
-                "ok": False,
-                "error": f"Photoshop is running but has no open document{f': {detail}' if detail else ''}",
-                "reason": reason,
-                "image": str(image_path),
-            }
+            error = f"Photoshop is running but has no open document{f': {detail}' if detail else ''}"
+            return _fail(reason, error, image_path)
         if stdout.startswith(MARKER_ERROR):
             detail = stdout[len(MARKER_ERROR):].strip()
             return _error_result(detail, image_path, script_name)
         # No marker and exit 0: unexpected, treat as failure.
-        return {
-            "ok": False,
-            "error": f"osascript returned no result marker ({stdout or 'empty output'})",
-            "reason": "photoshop_unexpected_output",
-            "image": str(image_path),
-        }
+        return _fail(
+            "photoshop_unexpected_output",
+            f"osascript returned no result marker ({stdout or 'empty output'})",
+            image_path,
+        )
 
     # Non-zero exit. Compile failures mean the verb is not in this Photoshop
     # version's dictionary — the caller moves on to the next script.
     if _is_compile_failure(stderr):
         return None
     if _looks_like_not_installed(stderr):
-        return {
-            "ok": False,
-            "error": "Adobe Photoshop is not installed (com.adobe.Photoshop not found)",
-            "reason": "photoshop_not_installed",
-            "image": str(image_path),
-        }
+        return _fail(
+            "photoshop_not_installed",
+            "Adobe Photoshop is not installed (com.adobe.Photoshop not found)",
+            image_path,
+        )
     return _error_result(stderr or f"osascript exited {completed.returncode}", image_path, script_name)
 
 
@@ -338,20 +282,10 @@ def _error_result(message: str, image_path: Path, script_name: str) -> dict[str,
         reason = "photoshop_timeout"
     elif "no document" in message.lower():
         reason = "photoshop_no_document"
-    return {
-        "ok": False,
-        "error": f"Photoshop {script_name} failed: {message}",
-        "reason": reason,
-        "image": str(image_path),
-    }
+    return _fail(reason, f"Photoshop {script_name} failed: {message}", image_path)
 
 
-def place_in_photoshop(
-    image_path: str | Path,
-    *,
-    timeout: float = 120.0,
-    dry_run: bool = False,
-) -> dict[str, Any]:
+def place_in_photoshop(image_path: str | Path, *, timeout: float = 120.0) -> dict[str, Any]:
     """Place a PNG into Photoshop's frontmost document (macOS only).
 
     Returns ``{"ok": True, "placed": True, ...}`` on success or a clear
@@ -360,37 +294,16 @@ def place_in_photoshop(
     """
     path = Path(image_path).expanduser()
     if not is_macos():
-        return {
-            "ok": False,
-            "error": "Photoshop place mode is macOS-only",
-            "reason": "unsupported_platform",
-            "image": str(path),
-        }
+        return _fail("unsupported_platform", "Photoshop place mode is macOS-only", path)
     if not path.is_absolute():
         path = path.resolve()
-
-    if dry_run:
-        return {
-            "ok": True,
-            "dry_run": True,
-            "image": str(path),
-            "scripts": scripts_for_placement(),
-            "commands": [
-                _command_for(script, path) for _name, script in _PLACEMENT_SCRIPTS
-            ],
-        }
-
     if not path.exists():
-        return {
-            "ok": False,
-            "error": f"image not found: {path}",
-            "reason": "missing_image",
-            "image": str(path),
-        }
+        return _fail("missing_image", f"image not found: {path}", path)
 
     compile_failures: list[str] = []
     for script_name, script in _PLACEMENT_SCRIPTS:
-        command = _command_for(script, path)
+        # The image path travels as an argv item, never interpolated into the script.
+        command = ["osascript", "-e", script, str(path)]
         try:
             completed = subprocess.run(
                 command,
@@ -400,19 +313,13 @@ def place_in_photoshop(
                 check=False,
             )
         except FileNotFoundError:
-            return {
-                "ok": False,
-                "error": "osascript not found (macOS-only feature)",
-                "reason": "osascript_missing",
-                "image": str(path),
-            }
+            return _fail("osascript_missing", "osascript not found (macOS-only feature)", path)
         except subprocess.TimeoutExpired:
-            return {
-                "ok": False,
-                "error": f"osascript timed out after {timeout:g}s waiting for Photoshop",
-                "reason": "photoshop_timeout",
-                "image": str(path),
-            }
+            return _fail(
+                "photoshop_timeout",
+                f"osascript timed out after {timeout:g}s waiting for Photoshop",
+                path,
+            )
 
         result = _classify_script_result(script_name, completed, path)
         if result is not None:
@@ -421,15 +328,10 @@ def place_in_photoshop(
 
     # Every script failed to compile against the installed Photoshop dictionary.
     return {
-        "ok": False,
-        "error": "no Photoshop AppleScript path available for this Photoshop version",
-        "reason": "photoshop_unsupported",
-        "image": str(path),
+        **_fail(
+            "photoshop_unsupported",
+            "no Photoshop AppleScript path available for this Photoshop version",
+            path,
+        ),
         "details": compile_failures,
     }
-
-
-def quoted_command_for_script(script_name: str, image_path: str | Path) -> str:
-    """Human-readable shell command for a single script (tests/debugging)."""
-    script = _script_by_name(script_name)
-    return " ".join(shlex.quote(part) for part in _command_for(script, Path(image_path)))

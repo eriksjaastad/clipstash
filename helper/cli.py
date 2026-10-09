@@ -54,32 +54,23 @@ error naming the file and exits 1 instead of saving somewhere else.
 
 Setup
 -----
-Stranger install on macOS, either path (see packaging/homebrew/README.md):
+Install on macOS either way (packaging/homebrew/README.md has the brew command):
 
-  Homebrew formula
-      packaging/homebrew/clipstash.rb installs clipstashd on PATH (the README
-      next to it has the brew install command).
+  Homebrew       packaging/homebrew/clipstash.rb installs clipstashd on PATH.
+  Single binary  scripts/build_macos_binary.sh builds dist/clipstashd, then
+                 scripts/install_macos_helper.sh installs it to
+                 ~/bin/clipstashd and loads the LaunchAgent.
 
-  Single binary
-      scripts/build_macos_binary.sh builds dist/clipstashd, then
-      scripts/install_macos_helper.sh installs it to ~/bin/clipstashd and
-      loads the LaunchAgent.
-
-Developer/venv path (macOS 12+, Python 3.11+):
+Developer path (macOS 12+, Python 3.11+):
 
   python3 -m venv .venv && source .venv/bin/activate
   pip install -e .        # or: uv sync  (then prefix commands with `uv run`)
-
-Run the helper:
-  python -m helper        # module form, no install needed
-  clipstashd              # installed entry point (default command: serve)
+  clipstashd              # default command: serve
+  python -m helper        # same, no install needed
   ./scripts/dev_up.sh     # one-command dev env: venv + deps + serve
-
-Health check:
   curl http://127.0.0.1:8787/health
 
-Extension:
-  chrome://extensions → Developer mode → Load unpacked → choose extension/.
+Extension: chrome://extensions → Developer mode → Load unpacked → extension/.
 
 Native burst (cross-origin video)
 ---------------------------------

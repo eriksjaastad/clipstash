@@ -17,7 +17,7 @@ from PIL import Image
 from support import PNG_1PX, PNG_1PX_B64, post_multipart_packet, request, server_url
 
 from helper import __version__
-from helper import bursts
+from helper import bursts, ffmpeg_burst
 from helper.bursts import create_burst, load_session, session_dir
 from helper.config import (
     ConfigError,
@@ -863,7 +863,7 @@ def test_burst_list_timestamp_is_a_last_resort_500(server):
 
 
 def test_ffmpeg_burst_forces_capture_method_and_metadata_fallbacks(server, monkeypatch):
-    monkeypatch.setattr("helper.server.ffmpeg_available", lambda: True)
+    monkeypatch.setattr("helper.server.ffmpeg_path", lambda: "/usr/bin/ffmpeg")
     monkeypatch.setattr("helper.server.burst_frames_from_url", lambda *args, **kwargs: [PNG_1PX])
     payload = {"media_url": "https://example.com/v.mp4", "source_url": "https://example.com/s"}
     payload["capture_method"] = "burst_canvas"
@@ -872,6 +872,16 @@ def test_ffmpeg_burst_forces_capture_method_and_metadata_fallbacks(server, monke
     assert (meta["capture_method"], meta["page_url"], meta["site"]) == (
         "burst_ffmpeg", payload["source_url"], "generic"
     )
+
+
+def test_googlevideo_media_goes_to_ytdlp_on_a_generic_site(monkeypatch):
+    calls = []
+    for name in ("_download_with_ytdlp", "_download_with_urllib"):
+        monkeypatch.setattr(ffmpeg_burst, name, lambda url, tmpdir, name=name: calls.append(name) or tmpdir)
+    monkeypatch.setattr(ffmpeg_burst, "ytdlp_available", lambda: True)
+    tmpdir = ffmpeg_burst.fetch_media_to_temp("https://rr1.googlevideo.com/videoplayback", site="generic")
+    tmpdir.rmdir()  # governance: allow-delete DS001: empty mkdtemp dir the stubbed download returned
+    assert calls == ["_download_with_ytdlp"]
 
 
 def test_list_timestamp_becomes_none_in_create_burst_and_choose_frame(tmp_path):

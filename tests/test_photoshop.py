@@ -2,20 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 
 from support import PNG_1PX, PNG_1PX_B64, post_multipart_packet, request, server_url
 
 from helper import bursts, photoshop
-from helper.photoshop import (
-    build_duplicate_script,
-    build_open_script,
-    build_place_script,
-    env_photoshop_enabled,
-    place_in_photoshop,
-    scripts_for_placement,
-)
+from helper.photoshop import env_photoshop_enabled, place_in_photoshop
 
 
 def make_payload(**overrides):
@@ -64,46 +58,31 @@ def fake_run(stdout="", stderr="", returncode=0, raise_exc=None):
     return _run, calls
 
 
+def place_mocked(monkeypatch, tmp_path, run):
+    """place_in_photoshop on a real PNG, with macOS forced and subprocess.run faked."""
+    write_sample_png(tmp_path)
+    monkeypatch.setattr(photoshop, "is_macos", lambda: True)
+    monkeypatch.setattr(photoshop.subprocess, "run", run)
+    return place_in_photoshop(tmp_path / "still.png")
+
+
 # --------------------------------------------------------------------------
-# script generation / dry-run
+# script text
 # --------------------------------------------------------------------------
 
 
-def test_scripts_receive_path_as_argv_not_interpolation():
-    for script in scripts_for_placement():
-        text = script["script"]
-        assert "on run argv" in text
-        assert "com.adobe.Photoshop" in text
-        assert "POSIX file imagePath" in text
-        assert "/tmp/secret path.png" not in text
-
-
-def test_place_script_uses_legacy_place_verb():
-    assert "place docRef file imageFile" in build_place_script()
-    assert "CLIPSTASH_PLACED" in build_place_script()
-
-
-def test_duplicate_script_opens_then_duplicates_layers():
-    script = build_duplicate_script()
-    assert "open imageFile showing dialogs never" in script
-    assert "duplicate every art layer of openedDoc to targetDoc" in script
-    assert "close openedDoc saving no" in script
-
-
-def test_open_script_is_last_resort():
-    script = build_open_script()
-    assert "open imageFile showing dialogs never" in script
-    assert "CLIPSTASH_OPENED" in script
-    assert "duplicate" not in script
-
-
-def test_dry_run_does_not_require_image_or_osascript(tmp_path):
-    result = place_in_photoshop(tmp_path / "does-not-exist.png", dry_run=True)
-    assert result["ok"] is True
-    assert result["dry_run"] is True
-    assert len(result["scripts"]) == 3
-    assert [entry["name"] for entry in result["scripts"]] == ["place", "duplicate", "open"]
-    assert all(cmd[0] == "osascript" for cmd in result["commands"])
+def test_placement_scripts_are_byte_identical_to_main():
+    # sha256 of each script on main @ 879a890 (git show 879a890:helper/photoshop.py),
+    # in fallback order. A change here changes what osascript runs.
+    digests = [
+        (name, hashlib.sha256(script.encode("utf-8")).hexdigest())
+        for name, script in photoshop._PLACEMENT_SCRIPTS
+    ]
+    assert digests == [
+        ("place", "d66d7c373857440ac9c8bf87399553ef6d547efa3443712c14e03a9c2d23781d"),
+        ("duplicate", "e3b9d1dc89f129f7f659c8ec84327575df49f7e5f3b22c41fed9c0bf595bc245"),
+        ("open", "3afa30a05c051842168e947d42394a52e898ad273432b463b588cd9207d1c12c"),
+    ]
 
 
 def test_non_darwin_returns_clear_error(monkeypatch, tmp_path):
@@ -138,13 +117,8 @@ def test_env_flag_parsing(monkeypatch):
 
 
 def test_place_success_mocked(monkeypatch, tmp_path):
-    write_sample_png(tmp_path)
-    monkeypatch.setattr(photoshop, "is_macos", lambda: True)
     run, calls = fake_run(stdout="CLIPSTASH_PLACED\n")
-    monkeypatch.setattr(photoshop.subprocess, "run", run)
-
-    result = place_in_photoshop(tmp_path / "still.png")
-
+    result = place_mocked(monkeypatch, tmp_path, run)
     assert result == {
         "ok": True,
         "placed": True,
@@ -158,52 +132,28 @@ def test_place_success_mocked(monkeypatch, tmp_path):
 
 
 def test_not_running_is_definitive_and_does_not_fall_back(monkeypatch, tmp_path):
-    write_sample_png(tmp_path)
-    monkeypatch.setattr(photoshop, "is_macos", lambda: True)
     run, calls = fake_run(stdout="CLIPSTASH_NOT_RUNNING\n")
-    monkeypatch.setattr(photoshop.subprocess, "run", run)
-
-    result = place_in_photoshop(tmp_path / "still.png")
-
-    assert result["ok"] is False
-    assert result["reason"] == "photoshop_not_running"
-    assert len(calls) == 1
+    result = place_mocked(monkeypatch, tmp_path, run)
+    assert (result["ok"], result["reason"], len(calls)) == (False, "photoshop_not_running", 1)
 
 
 def test_no_document_is_definitive(monkeypatch, tmp_path):
-    write_sample_png(tmp_path)
-    monkeypatch.setattr(photoshop, "is_macos", lambda: True)
     run, calls = fake_run(
         stdout="CLIPSTASH_NO_DOCUMENT: Adobe Photoshop got an error: no document is open\n"
     )
-    monkeypatch.setattr(photoshop.subprocess, "run", run)
-
-    result = place_in_photoshop(tmp_path / "still.png")
-
-    assert result["ok"] is False
-    assert result["reason"] == "photoshop_no_document"
-    assert len(calls) == 1
+    result = place_mocked(monkeypatch, tmp_path, run)
+    assert (result["ok"], result["reason"], len(calls)) == (False, "photoshop_no_document", 1)
 
 
 def test_no_document_timeout_classified_as_timeout(monkeypatch, tmp_path):
-    write_sample_png(tmp_path)
-    monkeypatch.setattr(photoshop, "is_macos", lambda: True)
     run, calls = fake_run(
         stdout="CLIPSTASH_NO_DOCUMENT: Adobe Photoshop 2026 got an error: AppleEvent timed out. (-1712)\n"
     )
-    monkeypatch.setattr(photoshop.subprocess, "run", run)
-
-    result = place_in_photoshop(tmp_path / "still.png")
-
-    assert result["ok"] is False
-    assert result["reason"] == "photoshop_timeout"
-    assert len(calls) == 1
+    result = place_mocked(monkeypatch, tmp_path, run)
+    assert (result["ok"], result["reason"], len(calls)) == (False, "photoshop_timeout", 1)
 
 
 def test_compile_failure_falls_back_to_duplicate_script(monkeypatch, tmp_path):
-    write_sample_png(tmp_path)
-    monkeypatch.setattr(photoshop, "is_macos", lambda: True)
-
     calls = []
     outputs = [
         (1, "script error: Expected end of line, etc. but found identifier. (-2741)\n"),
@@ -215,91 +165,60 @@ def test_compile_failure_falls_back_to_duplicate_script(monkeypatch, tmp_path):
         returncode, output = outputs[min(len(calls), len(outputs)) - 1]
         return subprocess.CompletedProcess(command, returncode, stdout=output if returncode == 0 else "", stderr=output if returncode != 0 else "")
 
-    monkeypatch.setattr(photoshop.subprocess, "run", _run)
-
-    result = place_in_photoshop(tmp_path / "still.png")
-
-    assert result["ok"] is True
-    assert result["method"] == "duplicate"
-    assert len(calls) == 2
+    result = place_mocked(monkeypatch, tmp_path, _run)
+    assert (result["ok"], result["method"], len(calls)) == (True, "duplicate", 2)
 
 
 def test_all_scripts_compile_failure(monkeypatch, tmp_path):
-    write_sample_png(tmp_path)
-    monkeypatch.setattr(photoshop, "is_macos", lambda: True)
-
-    def _run(command, **kwargs):
-        return subprocess.CompletedProcess(
-            command,
-            1,
-            stdout="",
-            stderr="script error: Expected end of line but found identifier. (-2741)\n",
-        )
-
-    monkeypatch.setattr(photoshop.subprocess, "run", _run)
-
-    result = place_in_photoshop(tmp_path / "still.png")
-
-    assert result["ok"] is False
-    assert result["reason"] == "photoshop_unsupported"
-    assert len(result["details"]) == 3
+    run, _calls = fake_run(
+        returncode=1, stderr="script error: Expected end of line but found identifier. (-2741)\n"
+    )
+    result = place_mocked(monkeypatch, tmp_path, run)
+    assert (result["ok"], result["reason"], len(result["details"])) == (False, "photoshop_unsupported", 3)
 
 
 def test_osascript_missing(monkeypatch, tmp_path):
-    write_sample_png(tmp_path)
-    monkeypatch.setattr(photoshop, "is_macos", lambda: True)
-    run, _calls = fake_run(raise_exc=FileNotFoundError("osascript"))
-    monkeypatch.setattr(photoshop.subprocess, "run", run)
-
-    result = place_in_photoshop(tmp_path / "still.png")
-    assert result["ok"] is False
-    assert result["reason"] == "osascript_missing"
+    result = place_mocked(monkeypatch, tmp_path, fake_run(raise_exc=FileNotFoundError("osascript"))[0])
+    assert (result["ok"], result["reason"]) == (False, "osascript_missing")
 
 
 def test_osascript_timeout_expired(monkeypatch, tmp_path):
-    write_sample_png(tmp_path)
-    monkeypatch.setattr(photoshop, "is_macos", lambda: True)
-
-    def _run(command, **kwargs):
-        raise subprocess.TimeoutExpired(command, 120)
-
-    monkeypatch.setattr(photoshop.subprocess, "run", _run)
-
-    result = place_in_photoshop(tmp_path / "still.png")
-    assert result["ok"] is False
-    assert result["reason"] == "photoshop_timeout"
+    run, _calls = fake_run(raise_exc=subprocess.TimeoutExpired("osascript", 120))
+    result = place_mocked(monkeypatch, tmp_path, run)
+    assert (result["ok"], result["reason"]) == (False, "photoshop_timeout")
 
 
 def test_automation_denied_stderr(monkeypatch, tmp_path):
-    write_sample_png(tmp_path)
-    monkeypatch.setattr(photoshop, "is_macos", lambda: True)
-    run, calls = fake_run(
-        returncode=1,
-        stderr="osascript is not allowed to send events. (-1743)\n",
-    )
-    monkeypatch.setattr(photoshop.subprocess, "run", run)
-
-    result = place_in_photoshop(tmp_path / "still.png")
-
-    assert result["ok"] is False
-    assert result["reason"] == "photoshop_automation_denied"
-    assert len(calls) == 1
+    run, calls = fake_run(returncode=1, stderr="osascript is not allowed to send events. (-1743)\n")
+    result = place_mocked(monkeypatch, tmp_path, run)
+    assert (result["ok"], result["reason"], len(calls)) == (False, "photoshop_automation_denied", 1)
 
 
 def test_photoshop_not_installed_stderr(monkeypatch, tmp_path):
-    write_sample_png(tmp_path)
-    monkeypatch.setattr(photoshop, "is_macos", lambda: True)
     run, calls = fake_run(
         returncode=1,
         stderr="script error: Can’t get application id \"com.adobe.Photoshop\". (-1728)\n",
     )
-    monkeypatch.setattr(photoshop.subprocess, "run", run)
+    result = place_mocked(monkeypatch, tmp_path, run)
+    assert (result["ok"], result["reason"], len(calls)) == (False, "photoshop_not_installed", 1)
 
-    result = place_in_photoshop(tmp_path / "still.png")
 
-    assert result["ok"] is False
-    assert result["reason"] == "photoshop_not_installed"
-    assert len(calls) == 1
+def test_error_marker_is_osascript_failed_with_the_full_failure_shape(monkeypatch, tmp_path):
+    result = place_mocked(monkeypatch, tmp_path, fake_run(stdout="CLIPSTASH_ERROR: boom\n")[0])
+    assert list(result.items()) == [
+        ("ok", False),
+        ("error", "Photoshop place failed: boom"),
+        ("reason", "photoshop_osascript_failed"),
+        ("image", str(tmp_path / "still.png")),
+    ]
+
+
+def test_exit_zero_without_marker_is_unexpected_output(monkeypatch, tmp_path):
+    result = place_mocked(monkeypatch, tmp_path, fake_run(stdout="")[0])
+    assert (result["reason"], result["error"]) == (
+        "photoshop_unexpected_output",
+        "osascript returned no result marker (empty output)",
+    )
 
 
 # --------------------------------------------------------------------------
