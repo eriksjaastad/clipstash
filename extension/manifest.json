@@ -10,11 +10,6 @@
   },
   "content_scripts": [
     {
-      "matches": ["http://127.0.0.1:8787/picker/*"],
-      "js": ["lib/picker-bridge.js"],
-      "run_at": "document_idle"
-    },
-    {
       "matches": [
         "*://*.youtube.com/*",
         "*://youtu.be/*",

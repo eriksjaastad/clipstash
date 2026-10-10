@@ -2,7 +2,7 @@
 //
 // Message hub for the popup/picker and owner of the clipboard history in
 // chrome.storage.local. Handles HEALTH, SAVE_PACKET (single frame capture),
-// BURST_PICK (burst capture + helper picker), APPEND_HISTORY, GET_HISTORY and
+// BURST_PICK (burst capture + helper picker), GET_HISTORY and
 // GET_CAPTURED_URLS (the canonicalized packet URL set used by the
 // green-check overlay). Talks to the local helper through lib/helper-api.js.
 // Canvas-taint falls back to captureVisibleTab; the content scripts report a
@@ -11,16 +11,14 @@
 // the video rectangle. For tainted *bursts* we first try the helper's native
 // ffmpeg burst from the video's media URL (`burst_ffmpeg`); when the media URL
 // is missing or the helper path fails, we fall back to a single cropped
-// visible-tab shot (`burst_visible_tab`). Burst-chosen history entries are
-// drained from the helper's pending queue so picker tabs don't need direct
-// storage access.
+// visible-tab shot (`burst_visible_tab`). A frame chosen in the picker tab is
+// queued by the helper and reaches the history when GET_HISTORY (the popup
+// opening) drains GET /history/pending.
 
 importScripts("lib/urls.js", "lib/helper-api.js");
 
 const HISTORY_KEY = "clipstashHistory";
 const HISTORY_MAX = 20;
-const PENDING_POLL_INTERVAL_MS = 1000;
-const PENDING_POLL_TIMEOUT_MS = 3 * 60 * 1000;
 const CAPTURED_URLS_TTL_MS = 45 * 1000;
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -38,8 +36,6 @@ async function handleMessage(message) {
       return captureAndSave(Boolean(message.placePhotoshop), cleanName(message.name));
     case "BURST_PICK":
       return captureBurstAndOpenPicker(Boolean(message.placePhotoshop), cleanName(message.name));
-    case "APPEND_HISTORY":
-      return appendHistory(message.packet);
     case "GET_HISTORY":
       await drainPendingHistory();
       return { ok: true, history: await getHistory() };
@@ -323,11 +319,9 @@ async function tryNativeBurst(captured, placePhotoshop, name) {
   };
 }
 
-// Opens the helper's picker tab, then polls for the history entry it queues
-// when a frame is chosen. Rejects, without polling, if the tab won't open.
-async function openPicker(url) {
-  await chromeCallback((done) => chrome.tabs.create({ url }, done));
-  startPendingHistoryPolling();
+// Opens the helper's picker tab. Rejects if the tab won't open.
+function openPicker(url) {
+  return chromeCallback((done) => chrome.tabs.create({ url }, done));
 }
 
 function captureVisibleTabPng(windowId) {
@@ -376,18 +370,8 @@ function historyEntryFromPacket(record) {
   };
 }
 
-async function appendHistory(packet) {
-  if (!packet || !packet.id || !packet.title || !packet.source_url) {
-    return { ok: false, error: "APPEND_HISTORY requires a packet with id/title/source_url" };
-  }
-  await pushHistory(historyEntryFromPacket(packet));
-  invalidateCapturedUrls();
-  return { ok: true };
-}
-
-// Fallback path: the helper enqueues burst-chosen history entries while the
-// picker tab is open, and we drain them here. This covers the window between
-// a chosen frame and the content-script bridge (or a service-worker restart).
+// The helper queues burst-chosen history entries; the popup drains them
+// through GET_HISTORY, so they survive service-worker restarts.
 async function drainPendingHistory() {
   const body = await ClipStashHelper.fetchJson("/history/pending");
   if (!body.ok) {
@@ -421,32 +405,6 @@ function normalizeHistoryEntry(entry) {
     text: String(entry.text || `${entry.title}\n${entry.url}`),
     createdAt: String(entry.createdAt || ""),
   };
-}
-
-let pendingPollTimer = null;
-
-function startPendingHistoryPolling() {
-  if (pendingPollTimer) {
-    return;
-  }
-  const deadline = Date.now() + PENDING_POLL_TIMEOUT_MS;
-  pendingPollTimer = setInterval(async () => {
-    if (Date.now() >= deadline) {
-      stopPendingHistoryPolling();
-      return;
-    }
-    const result = await drainPendingHistory();
-    if (result.ok && result.appended.length > 0) {
-      stopPendingHistoryPolling();
-    }
-  }, PENDING_POLL_INTERVAL_MS);
-}
-
-function stopPendingHistoryPolling() {
-  if (pendingPollTimer) {
-    clearInterval(pendingPollTimer);
-    pendingPollTimer = null;
-  }
 }
 
 async function getHistory() {

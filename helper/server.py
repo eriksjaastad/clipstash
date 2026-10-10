@@ -305,7 +305,6 @@ def _picker_html(session_id: str, meta: dict[str, Any]) -> str:
             status.textContent = `Saved packet ${{payload.packet.id}}${{placed}}`;
             status.className = "status ok";
             document.querySelectorAll(".frame").forEach((button) => (button.disabled = true));
-            window.dispatchEvent(new CustomEvent("clipstash:chosen", {{ detail: payload.packet }}));
           }} else {{
             status.textContent = payload.error || "choose failed";
             status.className = "status err";

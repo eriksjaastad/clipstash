@@ -647,50 +647,6 @@ async function runBurst(url, doc) {
   check(Math.abs(video.currentTime - 10) < 1e-9, "burst.js restores currentTime after capture error");
 }
 
-// -- picker-bridge.js: forwards clipstash:chosen to the service worker ---------
-
-{
-  const listeners = new Map();
-  const messages = [];
-  const sandbox = makeSandbox({
-    window: {
-      addEventListener(name, fn) {
-        listeners.set(name, fn);
-      },
-      dispatchEvent(event) {
-        const fn = listeners.get(event.type);
-        if (fn) fn(event);
-        return true;
-      },
-    },
-    chrome: {
-      runtime: {
-        sendMessage(message) {
-          messages.push(message);
-        },
-      },
-    },
-  });
-  runScript(sandbox, "lib/picker-bridge.js");
-  check(listeners.has("clipstash:chosen"), "picker-bridge registers clipstash:chosen listener");
-
-  const packet = {
-    id: "01JBRIDGE0000000000000000",
-    title: "Bridge packet",
-    source_url: "https://example.com/v=bridge",
-    created_at: "2026-09-26T12:00:00+00:00",
-  };
-  sandbox.window.dispatchEvent({ type: "clipstash:chosen", detail: packet });
-  check(messages.length === 1, "picker-bridge sends one message per chosen event");
-  check(
-    messages[0] && messages[0].type === "APPEND_HISTORY" && messages[0].packet === packet,
-    "picker-bridge forwards packet as APPEND_HISTORY"
-  );
-
-  sandbox.window.dispatchEvent({ type: "clipstash:chosen", detail: null });
-  check(messages.length === 1, "picker-bridge ignores chosen events without a packet");
-}
-
 // -- options.js: loads config, saves new root via PUT /config ------------------
 
 {
@@ -822,17 +778,14 @@ function checkSavePacketSuccess(label, bg, response) {
   checkTabAccess(label, bg, ["lib/urls.js", "lib/adapters.js", "lib/frame.js", "content.js"]);
   check(sameJson(bg.storage.clipstashHistory, [PACKET_HISTORY_ENTRY]), `${label} stores the full history entry`);
   check(bg.openedTabs.length === 0, `${label} opens no tab`);
-  check(bg.pollStarts() === 0, `${label} starts no pending-history polling`);
 }
 
-// Every BURST_PICK success returns `expected`, opens only its picker tab, and
-// starts pending-history polling once. History is written later, when the
-// picker reports the chosen frame.
+// Every BURST_PICK success returns `expected` and opens only its picker tab.
+// History is written later, when the popup drains the helper's pending queue.
 function checkBurstPickSuccess(label, bg, response, expected) {
   checkFields(`${label} response`, response, expected);
   checkTabAccess(label, bg, ["lib/urls.js", "lib/adapters.js", "lib/frame.js", "lib/burst.js"]);
   check(bg.openedTabs.join() === expected.picker_url, `${label} opens only the picker tab`);
-  check(bg.pollStarts() === 1, `${label} starts pending-history polling once`);
   check(bg.storage.clipstashHistory === undefined, `${label} writes no history before the pick`);
 }
 
@@ -844,14 +797,8 @@ function loadBackground({ tabUrl = VIDEO_META.pageUrl, scriptResult, responses =
   const storage = {};
   const injections = [];
   const captureWindows = [];
-  let pollStarts = 0;
   let listener = null;
   const sandbox = makeSandbox({
-    setInterval: () => {
-      pollStarts += 1;
-      return 1;
-    },
-    clearInterval: () => {},
     importScripts: (...paths) => paths.forEach((path) => runScript(sandbox, path)),
     fetch: stubFetch(responses, fetched),
     chrome: {
@@ -893,7 +840,6 @@ function loadBackground({ tabUrl = VIDEO_META.pageUrl, scriptResult, responses =
     injections,
     captureWindows,
     visibleTabCaptures: () => captureWindows.length,
-    pollStarts: () => pollStarts,
     paths: () => fetched.map((entry) => new URL(entry.url).pathname),
   };
 }
@@ -1007,7 +953,14 @@ for (const [type, scriptResult] of [["SAVE_PACKET", CANVAS_STILL], ["BURST_PICK"
   check(response.ok === false && response.error === "active tab is not a http(s) page", `${label} is rejected`);
   check(bg.fetched.length === 0, `${label} never calls the helper`);
   check(bg.openedTabs.length === 0, `${label} opens no tab`);
-  check(bg.pollStarts() === 0, `${label} starts no pending-history polling`);
+}
+
+{
+  // A frame chosen in the picker reaches history only when the popup's
+  // GET_HISTORY drains the helper's pending queue.
+  const bg = loadBackground({ responses: { "/history/pending": [200, { ok: true, entries: [PACKET_HISTORY_ENTRY] }] } });
+  const response = await bg.send({ type: "GET_HISTORY" });
+  check(sameJson(response, { ok: true, history: [PACKET_HISTORY_ENTRY] }), "background GET_HISTORY drains the pending burst pick into history");
 }
 
 {

@@ -978,7 +978,7 @@ def test_burst_choose_enqueues_pending_history_and_drains(server):
     assert json.loads(body) == {"ok": True, "entries": []}
 
 
-def test_burst_picker_html_dispatches_chosen_event(server):
+def test_burst_picker_meta_omits_photoshop_flag(server):
     status, _, body = request(
         server_url(server, "/bursts"),
         data=json.dumps(make_burst_payload(frame_count=1, photoshop=True)).encode("utf-8"),
@@ -990,8 +990,6 @@ def test_burst_picker_html_dispatches_chosen_event(server):
     status, _, body = request(server_url(server, f"/picker/{session_id}"))
     assert status == 200
     html = body.decode("utf-8")
-    assert 'new CustomEvent("clipstash:chosen"' in html
-    assert "detail: payload.packet" in html
     # META is posted back to choose; the photoshop flag stays in the session.
     assert "photoshop" not in json.loads(re.search(r"const META = (.*);", html).group(1))
 
