@@ -173,7 +173,7 @@ function withDefaults(captured) {
 
 async function captureAndSave(placePhotoshop, name) {
   const { tab, captured, failure } = await injectCapture(
-    ["lib/adapters.js", "lib/frame.js", "content.js"],
+    ["lib/urls.js", "lib/adapters.js", "lib/frame.js", "content.js"],
     "injection failed",
     "frame capture failed"
   );
@@ -220,7 +220,7 @@ async function captureAndSave(placePhotoshop, name) {
 
 async function captureBurstAndOpenPicker(placePhotoshop, name) {
   const { tab, captured, failure } = await injectCapture(
-    ["lib/adapters.js", "lib/frame.js", "lib/burst.js"],
+    ["lib/urls.js", "lib/adapters.js", "lib/frame.js", "lib/burst.js"],
     "burst injection failed",
     "burst capture failed"
   );

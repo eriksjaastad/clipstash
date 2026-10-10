@@ -8,8 +8,10 @@
 //     findVideo(ctxOrDocument): HTMLVideoElement | null
 //   }
 //
-// Injected into pages by background.js; exposed as
-// `globalThis.ClipStashAdapters` for lib/frame.js. The first matching adapter
+// Injected into pages by background.js after lib/urls.js; exposed as
+// `globalThis.ClipStashAdapters` for lib/frame.js. Site adapters take their
+// sourceUrl from ClipStashUrls.canonicalizeVideoUrl; the generic adapter keeps
+// the page URL as is. The first matching adapter
 // wins; the generic adapter is the always-matching fallback of last resort.
 
 globalThis.ClipStashAdapters = (() => {
@@ -48,47 +50,9 @@ globalThis.ClipStashAdapters = (() => {
     return hostnames.some((hostname) => hostnameMatches(url, hostname));
   }
 
-  function canonicalYouTubeUrl(url) {
-    const u = new URL(url);
-    if (u.hostname === "youtu.be") {
-      const id = u.pathname.replace(/^\//, "");
-      return id ? `https://www.youtube.com/watch?v=${id}` : u.href;
-    }
-    const videoId = u.searchParams.get("v");
-    return videoId ? `https://www.youtube.com/watch?v=${videoId}` : u.href;
-  }
-
-  function canonicalTwitterUrl(url) {
-    const u = new URL(url);
-    const match = u.pathname.match(/^\/([A-Za-z0-9_]{1,15})\/status\/(\d+)/);
-    if (match) {
-      return `https://x.com/${match[1]}/status/${match[2]}`;
-    }
-    return urlWithoutQueryHash(u);
-  }
-
-  function canonicalInstagramUrl(url) {
-    const u = new URL(url);
-    const match = u.pathname.match(/^\/(reel|reels|p|tv)\/([\w-]+)/);
-    if (match) {
-      const type = match[1] === "reels" ? "reel" : match[1];
-      return `https://www.instagram.com/${type}/${match[2]}/`;
-    }
-    return urlWithoutQueryHash(u);
-  }
-
-  function canonicalTikTokUrl(url) {
-    const u = new URL(url);
-    const match = u.pathname.match(/^\/@([\w.-]+)\/video\/(\d+)/);
-    if (match) {
-      return `https://www.tiktok.com/@${match[1]}/video/${match[2]}`;
-    }
-    return urlWithoutQueryHash(u);
-  }
-
-  function urlWithoutQueryHash(u) {
-    const clean = `${u.origin}${u.pathname}`.replace(/\/+$/, "");
-    return clean || u.href;
+  // Canonical source_url: the one shared rule in lib/urls.js (injected first).
+  function canonicalUrl(url) {
+    return globalThis.ClipStashUrls.canonicalizeVideoUrl(url);
   }
 
   // -- DOM helpers ---------------------------------------------------------
@@ -126,7 +90,7 @@ globalThis.ClipStashAdapters = (() => {
       const title = stripSuffix(ctx.document.title || "", " - YouTube");
       return {
         title: title || ctx.location.href,
-        sourceUrl: canonicalYouTubeUrl(ctx.location.href),
+        sourceUrl: canonicalUrl(ctx.location.href),
         currentTime: video ? video.currentTime : undefined,
       };
     },
@@ -149,7 +113,7 @@ globalThis.ClipStashAdapters = (() => {
       const title = stripSuffix(tweetText || ogTitle || ctx.document.title || "", " / X", " on X");
       return {
         title: title || ctx.location.href,
-        sourceUrl: canonicalTwitterUrl(ctx.location.href),
+        sourceUrl: canonicalUrl(ctx.location.href),
         currentTime: video ? video.currentTime : undefined,
       };
     },
@@ -174,7 +138,7 @@ globalThis.ClipStashAdapters = (() => {
       );
       return {
         title: title || ctx.location.href,
-        sourceUrl: canonicalInstagramUrl(ctx.location.href),
+        sourceUrl: canonicalUrl(ctx.location.href),
         currentTime: video ? video.currentTime : undefined,
       };
     },
@@ -200,7 +164,7 @@ globalThis.ClipStashAdapters = (() => {
       );
       return {
         title: title || ctx.location.href,
-        sourceUrl: canonicalTikTokUrl(ctx.location.href),
+        sourceUrl: canonicalUrl(ctx.location.href),
         currentTime: video ? video.currentTime : undefined,
       };
     },

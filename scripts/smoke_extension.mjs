@@ -98,8 +98,12 @@ function makeContext(url, doc) {
   });
 }
 
-const loadAdapters = (sandbox) => runScript(sandbox, "lib/adapters.js");
 const loadUrls = (sandbox) => runScript(sandbox, "lib/urls.js");
+// adapters.js needs lib/urls.js loaded first, as background.js injects them.
+const loadAdapters = (sandbox) => {
+  loadUrls(sandbox);
+  return runScript(sandbox, "lib/adapters.js");
+};
 
 // -- adapter selection -----------------------------------------------------
 
@@ -137,6 +141,14 @@ async function extractFor(url, doc) {
   check(info.sourceUrl === "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "youtube canonical source_url");
   check(info.title === "How I edit thumbnails", "youtube title strips - YouTube");
   check(info.currentTime === 42.5, "youtube currentTime");
+}
+
+{
+  const doc = makeDocument({ title: "Short - YouTube", video: makeVideo() });
+  const shorts = await extractFor("https://www.youtube.com/shorts/abc123XYZ_-?feature=share", doc);
+  check(shorts.sourceUrl === "https://www.youtube.com/watch?v=abc123XYZ_-", "youtube shorts source_url is the watch URL");
+  const channel = await extractFor("https://www.youtube.com/@someone/videos?view=0", doc);
+  check(channel.sourceUrl === "https://www.youtube.com/@someone/videos", "youtube non-watch source_url drops the query");
 }
 
 {
@@ -807,7 +819,7 @@ function checkTabAccess(label, bg, files) {
 // stores the history entry, and stays out of the burst machinery.
 function checkSavePacketSuccess(label, bg, response) {
   checkFields(`${label} response`, response, { ok: true, packet: PACKET, photoshop: PHOTOSHOP_PLACED });
-  checkTabAccess(label, bg, ["lib/adapters.js", "lib/frame.js", "content.js"]);
+  checkTabAccess(label, bg, ["lib/urls.js", "lib/adapters.js", "lib/frame.js", "content.js"]);
   check(sameJson(bg.storage.clipstashHistory, [PACKET_HISTORY_ENTRY]), `${label} stores the full history entry`);
   check(bg.openedTabs.length === 0, `${label} opens no tab`);
   check(bg.pollStarts() === 0, `${label} starts no pending-history polling`);
@@ -818,7 +830,7 @@ function checkSavePacketSuccess(label, bg, response) {
 // picker reports the chosen frame.
 function checkBurstPickSuccess(label, bg, response, expected) {
   checkFields(`${label} response`, response, expected);
-  checkTabAccess(label, bg, ["lib/adapters.js", "lib/frame.js", "lib/burst.js"]);
+  checkTabAccess(label, bg, ["lib/urls.js", "lib/adapters.js", "lib/frame.js", "lib/burst.js"]);
   check(bg.openedTabs.join() === expected.picker_url, `${label} opens only the picker tab`);
   check(bg.pollStarts() === 1, `${label} starts pending-history polling once`);
   check(bg.storage.clipstashHistory === undefined, `${label} writes no history before the pick`);

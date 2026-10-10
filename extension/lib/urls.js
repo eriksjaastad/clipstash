@@ -7,7 +7,7 @@
 //
 // Rules:
 // - YouTube: youtu.be/<id>, www/m.youtube.com/watch?v=<id> → https://www.youtube.com/watch?v=<id>.
-//   /shorts/<id> → the same watch URL when it appears on grids.
+//   /shorts/<id> → the same watch URL. Other YouTube paths drop query/hash.
 //   Relative hrefs must be absolutized by the caller (overlay uses location.href as base).
 // - Instagram: /reel|/reels|/p|/tv/<code>/ → https://www.instagram.com/<reel|p|tv>/<code>/
 //   (/reels/ collapses to /reel/).
