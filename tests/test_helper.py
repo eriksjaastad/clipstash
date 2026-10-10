@@ -31,7 +31,6 @@ from helper.crop import apply_crop_rect
 from helper.packets import (
     default_root,
     export_csv,
-    find_packet_dir,
     list_packets,
     new_record,
     normalize_site,
@@ -167,23 +166,10 @@ def test_write_packet_reslugifies_the_record_name(tmp_path):
     assert (tmp_path / "youtube" / record["id"] / "my-raw-name.png").exists()
 
 
-def test_read_record_legacy_flat_layout(tmp_path):
-    directory = tmp_path / "01JLEGACY0000000000000000"
-    directory.mkdir(parents=True)
-    (directory / "still.png").write_bytes(PNG_1PX)
-    (directory / "record.yaml").write_text(
-        "id: 01JLEGACY0000000000000000\n"
-        "title: Legacy flat\n"
-        "source_url: https://example.com/legacy\n"
-        "image: still.png\n",
-        encoding="utf-8",
-    )
-
-    record = read_record("01JLEGACY0000000000000000", root=tmp_path)
-    assert record["title"] == "Legacy flat"
-    assert record["image"] == "still.png"
-    assert find_packet_dir("01JLEGACY0000000000000000", root=tmp_path) == directory
-    assert packet_image_path(tmp_path, record) == directory / "still.png"
+def test_packet_image_path_without_image_fails_clearly(tmp_path):
+    record = write_packet(new_record("t", "https://example.com/t", site="youtube"), PNG_1PX, root=tmp_path)
+    with pytest.raises(FileNotFoundError, match="has no still image"):
+        packet_image_path(tmp_path, {"id": record["id"]})
 
 
 def test_read_record_missing_packet_fails_clearly(tmp_path):
@@ -223,26 +209,6 @@ def test_list_and_export_csv(tmp_path):
     assert csv_text.splitlines()[0] == header
     assert list(summaries[0]) == header.split(",")
     assert "First" in csv_text and "Second" in csv_text
-
-
-def test_list_packets_sees_site_and_legacy_flat(tmp_path):
-    record = new_record("Site packet", "https://example.com/site", site="youtube")
-    write_packet(record, PNG_1PX, root=tmp_path)
-
-    legacy_dir = tmp_path / "01JLEGACY0000000000000000"
-    legacy_dir.mkdir(parents=True)
-    (legacy_dir / "still.png").write_bytes(PNG_1PX)
-    (legacy_dir / "record.yaml").write_text(
-        "id: 01JLEGACY0000000000000000\n"
-        "title: Legacy packet\n"
-        "source_url: https://example.com/legacy\n"
-        "image: still.png\n",
-        encoding="utf-8",
-    )
-
-    summaries = list_packets(root=tmp_path)
-    titles = {s["title"] for s in summaries}
-    assert titles == {"Site packet", "Legacy packet"}
 
 
 # --------------------------------------------------------------------------

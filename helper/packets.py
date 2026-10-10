@@ -30,16 +30,9 @@ this key order::
 
 ``GET /packets`` and the CSV export carry only ``SUMMARY_FIELDS``.
 
-Packets written before site folders shipped live in a legacy flat layout:
-
-    <root>/<id>/
-      still.png
-      record.yaml
-
-Reads (`read_record`, `list_packets`, `packet_image_path`) tolerate that
-legacy layout so remakes, CSV export and place-by-id keep working. New writes
-always use the site layout and a slug; ``IMAGE_FILENAME`` remains only as the
-legacy read default.
+Reads (`read_record`, `list_packets`, `packet_image_path`) only look in site
+folders; the pre-site-folder flat layout (``<root>/<id>/still.png``) is no
+longer read.
 
 The default root is ``~/Clipstash/packets`` and can be overridden with the
 ``--root`` CLI flag, ``~/Clipstash/config.json`` (see ``helper.config``), or
@@ -60,7 +53,6 @@ import yaml
 
 from .slug import pick_slug, still_filename
 
-IMAGE_FILENAME = "still.png"
 RECORD_FILENAME = "record.yaml"
 
 #: Adapter ids; these are the only allowed site folder names under the root.
@@ -191,7 +183,6 @@ def _validate_record(record: dict[str, Any]) -> None:
     record.setdefault("capture_method", "canvas")
     record.setdefault("tags", [])
     record.setdefault("notes", "")
-    record.setdefault("image", IMAGE_FILENAME)
     record.setdefault("clipboard", {})
 
 
@@ -224,12 +215,9 @@ def write_packet(
 
 
 def find_packet_dir(packet_id: str, root: str | Path | None = None) -> Path:
-    """Locate a packet directory in the site layout or the legacy flat layout."""
+    """Locate ``<root>/<site>/<id>/``: adapter site folders first, then any other folder."""
     base = resolve_root(root)
     candidates = [base / site / packet_id for site in SITE_IDS]
-    flat = base / packet_id
-    if flat not in candidates:
-        candidates.append(flat)
     if base.exists():
         known = set(candidates)
         for child in base.iterdir():
@@ -259,11 +247,13 @@ def packet_image_path(
 ) -> Path:
     """Absolute path to a packet's still image from its record.
 
-    Resolves the packet directory the same way `read_record` does (site
-    layout first, legacy flat tolerated), then applies ``record["image"]``.
+    Resolves the packet directory the same way `read_record` does, then
+    applies ``record["image"]``.
     """
     directory = find_packet_dir(str(record["id"]), root)
-    return directory / str(record.get("image") or IMAGE_FILENAME)
+    if not record.get("image"):
+        raise FileNotFoundError(f"packet {record['id']!r} has no still image")
+    return directory / str(record["image"])
 
 
 def summarize(record: dict[str, Any]) -> dict[str, Any]:
@@ -277,8 +267,7 @@ def summarize(record: dict[str, Any]) -> dict[str, Any]:
 def list_packets(root: str | Path | None = None) -> list[dict[str, Any]]:
     """List packet summaries, newest first.
 
-    Walks one level of site folders (``<root>/<site>/<id>/``) and also picks
-    up legacy flat packets (``<root>/<id>/``) so old captures stay visible.
+    Walks one level of site folders (``<root>/<site>/<id>/``).
     """
     base = resolve_root(root)
     summaries: list[dict[str, Any]] = []
@@ -288,10 +277,6 @@ def list_packets(root: str | Path | None = None) -> list[dict[str, Any]]:
     directories: list[Path] = []
     for child in base.iterdir():
         if not child.is_dir():
-            continue
-        if (child / RECORD_FILENAME).exists():
-            # Legacy flat packet directory.
-            directories.append(child)
             continue
         for directory in child.iterdir():
             if directory.is_dir() and (directory / RECORD_FILENAME).exists():
