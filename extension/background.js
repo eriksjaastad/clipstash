@@ -13,7 +13,7 @@
 // is missing or the helper path fails, we fall back to a single cropped
 // visible-tab shot (`burst_visible_tab`). A frame chosen in the picker tab is
 // queued by the helper and reaches the history when GET_HISTORY (the popup
-// opening) drains GET /history/pending.
+// opening) drains POST /history/pending.
 
 importScripts("lib/urls.js", "lib/helper-api.js");
 
@@ -373,7 +373,7 @@ function historyEntryFromPacket(record) {
 // The helper queues burst-chosen history entries; the popup drains them
 // through GET_HISTORY, so they survive service-worker restarts.
 async function drainPendingHistory() {
-  const body = await ClipStashHelper.fetchJson("/history/pending");
+  const body = await ClipStashHelper.postJson("/history/pending", {});
   if (!body.ok) {
     return body;
   }

@@ -28,7 +28,8 @@ Endpoints:
   GET  /picker/<id>         -> HTML grid of burst frames
   GET  /picker/<id>/frame/N -> PNG for frame N
   POST /picker/<id>/choose  -> write chosen frame as a normal packet
-  GET  /history/pending     -> drain pending burst-chosen history entries
+  POST /history/pending     -> drain pending burst-chosen history entries (POST:
+                               it empties the queue)
 
 Both ``POST /packets`` and ``POST /bursts`` accept an optional ``crop_rect``
 request field (JSON object, or JSON string in a multipart ``POST /packets``):
@@ -349,7 +350,6 @@ class ClipStashHandler(BaseHTTPRequestHandler):
         ("GET", r"/config", "_serve_config"),
         ("GET", r"/packets", "_serve_packets"),
         ("GET", r"/export\.csv", "_serve_export"),
-        ("GET", r"/history/pending", "_serve_pending_history"),
         ("GET", r"/picker/([^/]+)", "_serve_picker"),
         ("GET", r"/picker/([^/]+)/frame/(\d+)", "_serve_frame"),
         ("POST", r"/packets", "_create_packet"),
@@ -357,6 +357,7 @@ class ClipStashHandler(BaseHTTPRequestHandler):
         ("POST", r"/bursts/ffmpeg", "_create_ffmpeg_burst_session"),
         ("POST", r"/packets/([^/]+)/place-photoshop", "_place_packet_in_photoshop"),
         ("POST", r"/picker/([^/]+)/choose", "_choose_burst_frame"),
+        ("POST", r"/history/pending", "_drain_pending_history"),
         ("PUT", r"/config", "_update_config"),
     )
 
@@ -457,7 +458,7 @@ class ClipStashHandler(BaseHTTPRequestHandler):
         with self.pending_history_lock:
             self.pending_history.append(entry)
 
-    def _serve_pending_history(self) -> None:
+    def _drain_pending_history(self) -> None:
         with self.pending_history_lock:
             entries = list(self.pending_history)
             self.pending_history.clear()

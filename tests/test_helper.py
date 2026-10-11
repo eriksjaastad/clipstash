@@ -970,7 +970,7 @@ def test_burst_choose_enqueues_pending_history_and_drains(server):
     assert status == 200
     packet = json.loads(body)["packet"]
 
-    status, _, body = request(server_url(server, "/history/pending"))
+    status, _, body = request(server_url(server, "/history/pending"), data=b"{}", method="POST")
     assert status == 200
     payload = json.loads(body)
     assert payload["ok"] is True
@@ -984,10 +984,16 @@ def test_burst_choose_enqueues_pending_history_and_drains(server):
         }
     ]
 
-    # The endpoint drains the queue: a second GET is empty.
-    status, _, body = request(server_url(server, "/history/pending"))
+    # The endpoint drains the queue: a second POST is empty.
+    status, _, body = request(server_url(server, "/history/pending"), data=b"{}", method="POST")
     assert status == 200
     assert json.loads(body) == {"ok": True, "entries": []}
+
+
+def test_history_drain_is_post_only(server):
+    status, _, body = request(server_url(server, "/history/pending"))
+    assert status == 404
+    assert json.loads(body) == {"ok": False, "error": "not found"}
 
 
 def test_burst_picker_meta_omits_photoshop_flag(server):

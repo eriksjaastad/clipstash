@@ -958,7 +958,7 @@ for (const [type, scriptResult] of [["SAVE_PACKET", CANVAS_STILL], ["BURST_PICK"
 {
   // A frame chosen in the picker reaches history only when the popup's
   // GET_HISTORY drains the helper's pending queue.
-  const bg = loadBackground({ responses: { "/history/pending": [200, { ok: true, entries: [PACKET_HISTORY_ENTRY] }] } });
+  const bg = loadBackground({ responses: { "POST /history/pending": [200, { ok: true, entries: [PACKET_HISTORY_ENTRY] }] } });
   const response = await bg.send({ type: "GET_HISTORY" });
   check(sameJson(response, { ok: true, history: [PACKET_HISTORY_ENTRY] }), "background GET_HISTORY drains the pending burst pick into history");
 }
