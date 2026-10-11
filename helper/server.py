@@ -1,6 +1,8 @@
 """Local HTTP server for clipstash.
 
-Binds 127.0.0.1 only. Endpoints:
+Binds 127.0.0.1 only and sends no CORS headers, so web pages cannot read its
+responses; the extension (via host_permissions) and the helper's own picker
+page are the only browser callers. Endpoints:
 
   GET  /health              -> {"ok": true, "version": "..."}
   GET  /config              -> {"ok": true, "packet_root": "...", "default_root": "...", "config_path": "..."}
@@ -374,9 +376,6 @@ class ClipStashHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
@@ -434,9 +433,6 @@ class ClipStashHandler(BaseHTTPRequestHandler):
         self._send_json({"ok": True, "entries": entries})
 
     # -- endpoints --------------------------------------------------------
-    def do_OPTIONS(self):  # noqa: N802 (stdlib name)
-        self._send(204, b"", "text/plain")
-
     def do_GET(self):  # noqa: N802
         self._dispatch("GET")
 
