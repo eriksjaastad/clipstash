@@ -40,7 +40,7 @@ from helper.packets import (
     ulid,
     write_packet,
 )
-from helper.server import create_server
+from helper.server import MAX_BODY_BYTES, REFUSED_DRAIN_BYTES, create_server
 
 GREEN = (0, 255, 0)
 RED = (255, 0, 0)
@@ -304,6 +304,48 @@ def test_request_naming_another_host_is_refused(server):
 def test_request_naming_localhost_on_the_serving_port_is_allowed(server):
     host = f"localhost:{server.server_address[1]}"
     assert request(server_url(server, "/health"), headers={"Host": host})[0] == 200
+
+
+def test_host_or_origin_on_another_port_is_refused(server):
+    status, _, body = request(server_url(server, "/health"), headers={"Host": "127.0.0.1:1"})
+    assert (status, json.loads(body)["error"]) == (403, "host not allowed: 127.0.0.1:1")
+    status, payload = post_packet_from(server, "http://127.0.0.1:1")
+    assert (status, payload["error"]) == (403, "origin not allowed: http://127.0.0.1:1")
+
+
+def test_null_origin_is_refused(server):
+    status, payload = post_packet_from(server, "null")
+    assert (status, payload["error"]) == (403, "origin not allowed: null")
+
+
+def send_raw(server, method, path, headers, *, skip_host=False):
+    """Send headers only (no body) and return (status, json body)."""
+    conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
+    try:
+        conn.putrequest(method, path, skip_host=skip_host)
+        for name, value in headers.items():
+            conn.putheader(name, value)
+        conn.endheaders()
+        response = conn.getresponse()
+        return response.status, json.loads(response.read())
+    finally:
+        conn.close()
+
+
+def test_request_without_host_is_allowed(server):
+    assert send_raw(server, "GET", "/health", {}, skip_host=True)[0] == 200
+
+
+def test_oversized_body_gets_413_without_being_read(server):
+    # No body is sent: reading it would time out instead of answering.
+    status, payload = send_raw(server, "POST", "/packets", {"Content-Length": str(MAX_BODY_BYTES + 1)})
+    assert (status, payload["error"]) == (413, f"request body too large (max {MAX_BODY_BYTES} bytes)")
+
+
+def test_refused_request_with_large_body_is_answered_without_reading_it(server):
+    headers = {"Content-Length": str(REFUSED_DRAIN_BYTES + 1), "Origin": "https://evil.example"}
+    status, payload = send_raw(server, "POST", "/packets", headers)
+    assert (status, payload["error"]) == (403, "origin not allowed: https://evil.example")
 
 
 def test_responses_carry_no_cors_header(server):

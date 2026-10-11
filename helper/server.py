@@ -9,7 +9,11 @@ helper's own loopback origin (``http://127.0.0.1:<port>``, ``localhost`` or
 is allowed. Every request must also name the helper itself in ``Host``
 (``127.0.0.1``, ``localhost`` or ``[::1]`` on the serving port), else 403, so a
 DNS-rebound web page cannot read packets; a request with no ``Host`` (an
-HTTP/1.0 client, never a browser) is allowed.
+HTTP/1.0 client, never a browser) is allowed. Any ``chrome-extension://`` origin
+passes: the unpacked extension's ID depends on its install path (no manifest
+``key``), and an installed extension already holds broad browser power.
+A body over ``MAX_BODY_BYTES`` gets 413 unread; a refused request's body is
+read only when it is small, so the client still sees the 403.
 Endpoints:
 
   GET  /health              -> {"ok": true, "version": "..."}
@@ -335,6 +339,12 @@ class _UnsupportedContentType(Exception):
     """The request body is neither JSON nor a form the route accepts (415)."""
 
 
+#: Largest request body read. A 15-frame 4K burst of base64 PNGs is about 370 MB.
+MAX_BODY_BYTES = 512 * 1024 * 1024
+#: A refused request's body is drained only up to this size, so its 403 arrives cleanly.
+REFUSED_DRAIN_BYTES = 64 * 1024
+
+
 class ClipStashHandler(BaseHTTPRequestHandler):
     server_version = "clipstashd/" + __version__
     root: str | None = None
@@ -432,12 +442,18 @@ class ClipStashHandler(BaseHTTPRequestHandler):
 
     def _dispatch(self, method: str) -> None:
         path = urlparse(self.path).path
-        if method != "GET":
-            self.body = self._read_body()
+        length = 0 if method == "GET" else int(self.headers.get("Content-Length") or 0)
         refusal = self._refusal(method)
         if refusal:
+            if length <= REFUSED_DRAIN_BYTES:
+                self._read_body()
             self._send_json({"ok": False, "error": refusal}, 403)
             return
+        if length > MAX_BODY_BYTES:
+            self._send_json({"ok": False, "error": f"request body too large (max {MAX_BODY_BYTES} bytes)"}, 413)
+            return
+        if method != "GET":
+            self.body = self._read_body()
         try:
             for route_method, pattern, handler in self.ROUTES:
                 match = re.fullmatch(pattern, path) if route_method == method else None
