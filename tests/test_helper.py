@@ -265,6 +265,36 @@ def test_health_endpoint(server):
     assert payload == {"ok": True, "version": __version__}
 
 
+def post_packet_from(server, origin):
+    headers = {"Origin": origin} if origin else {}
+    status, _, body = request(
+        server_url(server, "/packets"),
+        data=json.dumps(make_payload()).encode("utf-8"),
+        method="POST",
+        headers=headers,
+    )
+    return status, json.loads(body)
+
+
+def test_state_change_from_web_page_origin_is_refused(server):
+    status, payload = post_packet_from(server, "https://evil.example")
+    assert status == 403
+    assert payload == {"ok": False, "error": "origin not allowed: https://evil.example"}
+    assert list_packets(root=server.RequestHandlerClass.root) == []
+
+
+def test_state_change_from_extension_origin_is_allowed(server):
+    assert post_packet_from(server, "chrome-extension://abcdefghijklmnop")[0] == 201
+
+
+def test_state_change_from_helper_own_origin_is_allowed(server):
+    assert post_packet_from(server, f"http://127.0.0.1:{server.server_address[1]}")[0] == 201
+
+
+def test_state_change_without_origin_is_allowed(server):
+    assert post_packet_from(server, None)[0] == 201
+
+
 def test_responses_carry_no_cors_header(server):
     with urllib.request.urlopen(server_url(server, "/health"), timeout=30) as resp:
         assert not [name for name in resp.headers if name.lower().startswith("access-control-")]
