@@ -295,6 +295,17 @@ def test_state_change_without_origin_is_allowed(server):
     assert post_packet_from(server, None)[0] == 201
 
 
+def test_request_naming_another_host_is_refused(server):
+    status, _, body = request(server_url(server, "/packets"), headers={"Host": "rebound.example:8787"})
+    assert status == 403
+    assert json.loads(body) == {"ok": False, "error": "host not allowed: rebound.example:8787"}
+
+
+def test_request_naming_localhost_on_the_serving_port_is_allowed(server):
+    host = f"localhost:{server.server_address[1]}"
+    assert request(server_url(server, "/health"), headers={"Host": host})[0] == 200
+
+
 def test_responses_carry_no_cors_header(server):
     with urllib.request.urlopen(server_url(server, "/health"), timeout=30) as resp:
         assert not [name for name in resp.headers if name.lower().startswith("access-control-")]

@@ -6,7 +6,10 @@ page are the only browser callers. POST and PUT are refused with 403 when an
 ``Origin`` header is present and is neither ``chrome-extension://…`` nor the
 helper's own loopback origin (``http://127.0.0.1:<port>``, ``localhost`` or
 ``[::1]``), so a web page cannot change state. No ``Origin`` (curl, the CLI)
-is allowed. GET is not checked: its responses are unreadable cross-origin.
+is allowed. Every request must also name the helper itself in ``Host``
+(``127.0.0.1``, ``localhost`` or ``[::1]`` on the serving port), else 403, so a
+DNS-rebound web page cannot read packets; a request with no ``Host`` (an
+HTTP/1.0 client, never a browser) is allowed.
 Endpoints:
 
   GET  /health              -> {"ok": true, "version": "..."}
@@ -407,22 +410,33 @@ class ClipStashHandler(BaseHTTPRequestHandler):
             return self._json_body(), None
         raise _UnsupportedContentType("expected JSON or multipart/form-data")
 
-    def _origin_allowed(self) -> bool:
-        """No Origin, the extension, or this helper's own loopback origin."""
-        origin = self.headers.get("Origin")
-        if origin is None or origin.startswith("chrome-extension://"):
-            return True
+    def _own_hosts(self) -> set[str]:
+        """This helper's own ``host:port`` names, as Host and Origin carry them."""
         port = self.server.server_address[1]
-        return origin in {f"http://{host}:{port}" for host in ("127.0.0.1", "localhost", "[::1]")}
+        return {f"{host}:{port}" for host in ("127.0.0.1", "localhost", "[::1]")}
+
+    def _refusal(self, method: str) -> str | None:
+        """Why the request is refused, or None. Host is checked on every request;
+        Origin only on state changes (no Origin, the extension or the helper's
+        own page is allowed)."""
+        host = self.headers.get("Host")
+        if host is not None and host not in self._own_hosts():
+            return f"host not allowed: {host}"
+        origin = self.headers.get("Origin")
+        if method == "GET" or origin is None or origin.startswith("chrome-extension://"):
+            return None
+        if origin in {f"http://{host}" for host in self._own_hosts()}:
+            return None
+        return f"origin not allowed: {origin}"
 
     def _dispatch(self, method: str) -> None:
         path = urlparse(self.path).path
         if method != "GET":
             self.body = self._read_body()
-            if not self._origin_allowed():
-                origin = self.headers.get("Origin")
-                self._send_json({"ok": False, "error": f"origin not allowed: {origin}"}, 403)
-                return
+        refusal = self._refusal(method)
+        if refusal:
+            self._send_json({"ok": False, "error": refusal}, 403)
+            return
         try:
             for route_method, pattern, handler in self.ROUTES:
                 match = re.fullmatch(pattern, path) if route_method == method else None
