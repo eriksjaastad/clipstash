@@ -265,6 +265,11 @@ def test_health_endpoint(server):
     assert payload == {"ok": True, "version": __version__}
 
 
+def test_responses_carry_no_cors_header(server):
+    with urllib.request.urlopen(server_url(server, "/health"), timeout=30) as resp:
+        assert not [name for name in resp.headers if name.lower().startswith("access-control-")]
+
+
 def test_post_packet_json_and_list(server):
     status, _, body = request(
         server_url(server, "/packets"),
