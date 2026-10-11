@@ -13,7 +13,9 @@ HTTP/1.0 client, never a browser) is allowed. Any ``chrome-extension://`` origin
 passes: the unpacked extension's ID depends on its install path (no manifest
 ``key``), and an installed extension already holds broad browser power.
 A body over ``MAX_BODY_BYTES`` gets 413 unread; a refused request's body is
-read only when it is small, so the client still sees the 403.
+read only when it is small, so the client still sees the 403. A body must
+come with a plain ``Content-Length``: ``Transfer-Encoding`` gets 411 and a
+non-numeric or negative length gets 400.
 Endpoints:
 
   GET  /health              -> {"ok": true, "version": "..."}
@@ -402,11 +404,13 @@ class ClipStashHandler(BaseHTTPRequestHandler):
     def _send_json(self, payload: Any, status: int = 200) -> None:
         self._send(status, json.dumps(payload).encode("utf-8"), JSON)
 
-    def _read_body(self) -> bytes:
-        length = int(self.headers.get("Content-Length") or 0)
-        if length <= 0:
-            return b""
-        return self.rfile.read(length)
+    def _content_length(self) -> int:
+        """The declared body length: 0 when absent, -1 when not a non-negative integer."""
+        raw = self.headers.get("Content-Length", "0").strip()
+        return int(raw) if raw.isascii() and raw.isdigit() else -1
+
+    def _read_body(self, length: int) -> bytes:
+        return self.rfile.read(length) if length > 0 else b""
 
     def _json_body(self) -> Any:
         return json.loads(self.body.decode("utf-8") or "{}")
@@ -442,18 +446,24 @@ class ClipStashHandler(BaseHTTPRequestHandler):
 
     def _dispatch(self, method: str) -> None:
         path = urlparse(self.path).path
-        length = 0 if method == "GET" else int(self.headers.get("Content-Length") or 0)
+        length = 0 if method == "GET" else self._content_length()
         refusal = self._refusal(method)
         if refusal:
-            if length <= REFUSED_DRAIN_BYTES:
-                self._read_body()
+            if 0 <= length <= REFUSED_DRAIN_BYTES:
+                self._read_body(length)
             self._send_json({"ok": False, "error": refusal}, 403)
+            return
+        if method != "GET" and "Transfer-Encoding" in self.headers:
+            self._send_json({"ok": False, "error": "Content-Length required"}, 411)
+            return
+        if length < 0:
+            self._send_json({"ok": False, "error": "invalid Content-Length"}, 400)
             return
         if length > MAX_BODY_BYTES:
             self._send_json({"ok": False, "error": f"request body too large (max {MAX_BODY_BYTES} bytes)"}, 413)
             return
         if method != "GET":
-            self.body = self._read_body()
+            self.body = self._read_body(length)
         try:
             for route_method, pattern, handler in self.ROUTES:
                 match = re.fullmatch(pattern, path) if route_method == method else None

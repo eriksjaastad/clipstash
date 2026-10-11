@@ -342,6 +342,16 @@ def test_oversized_body_gets_413_without_being_read(server):
     assert (status, payload["error"]) == (413, f"request body too large (max {MAX_BODY_BYTES} bytes)")
 
 
+def test_invalid_content_length_gets_400(server):
+    status, payload = send_raw(server, "POST", "/packets", {"Content-Length": "abc"})
+    assert (status, payload["error"]) == (400, "invalid Content-Length")
+
+
+def test_chunked_body_gets_411(server):
+    status, payload = send_raw(server, "POST", "/packets", {"Transfer-Encoding": "chunked"})
+    assert (status, payload["error"]) == (411, "Content-Length required")
+
+
 def test_refused_request_with_large_body_is_answered_without_reading_it(server):
     headers = {"Content-Length": str(REFUSED_DRAIN_BYTES + 1), "Origin": "https://evil.example"}
     status, payload = send_raw(server, "POST", "/packets", headers)
