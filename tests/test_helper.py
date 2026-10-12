@@ -40,7 +40,7 @@ from helper.packets import (
     ulid,
     write_packet,
 )
-from helper.server import create_server
+from helper.server import MAX_BODY_BYTES, REFUSED_DRAIN_BYTES, create_server
 
 GREEN = (0, 255, 0)
 RED = (255, 0, 0)
@@ -263,6 +263,99 @@ def test_health_endpoint(server):
     payload = json.loads(body)
     assert status == 200
     assert payload == {"ok": True, "version": __version__}
+
+
+def post_packet_from(server, origin):
+    headers = {"Origin": origin} if origin else {}
+    status, _, body = request(
+        server_url(server, "/packets"),
+        data=json.dumps(make_payload()).encode("utf-8"),
+        method="POST",
+        headers=headers,
+    )
+    return status, json.loads(body)
+
+
+def test_state_change_from_web_page_origin_is_refused(server):
+    status, payload = post_packet_from(server, "https://evil.example")
+    assert status == 403
+    assert payload == {"ok": False, "error": "origin not allowed: https://evil.example"}
+    assert list_packets(root=server.RequestHandlerClass.root) == []
+
+
+def test_state_change_from_extension_origin_is_allowed(server):
+    assert post_packet_from(server, "chrome-extension://abcdefghijklmnop")[0] == 201
+
+
+def test_state_change_from_helper_own_origin_is_allowed(server):
+    assert post_packet_from(server, f"http://127.0.0.1:{server.server_address[1]}")[0] == 201
+
+
+def test_state_change_without_origin_is_allowed(server):
+    assert post_packet_from(server, None)[0] == 201
+
+
+def test_request_naming_another_host_is_refused(server):
+    status, _, body = request(server_url(server, "/packets"), headers={"Host": "rebound.example:8787"})
+    assert status == 403
+    assert json.loads(body) == {"ok": False, "error": "host not allowed: rebound.example:8787"}
+
+
+def test_request_naming_localhost_on_the_serving_port_is_allowed(server):
+    host = f"localhost:{server.server_address[1]}"
+    assert request(server_url(server, "/health"), headers={"Host": host})[0] == 200
+
+
+def test_host_or_origin_on_another_port_is_refused(server):
+    status, _, body = request(server_url(server, "/health"), headers={"Host": "127.0.0.1:1"})
+    assert (status, json.loads(body)["error"]) == (403, "host not allowed: 127.0.0.1:1")
+    status, payload = post_packet_from(server, "http://127.0.0.1:1")
+    assert (status, payload["error"]) == (403, "origin not allowed: http://127.0.0.1:1")
+
+
+def test_null_origin_is_refused(server):
+    status, payload = post_packet_from(server, "null")
+    assert (status, payload["error"]) == (403, "origin not allowed: null")
+
+
+def send_raw(server, method, path, headers, *, skip_host=False):
+    """Send headers only (no body) and return (status, json body)."""
+    conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
+    try:
+        conn.putrequest(method, path, skip_host=skip_host)
+        for name, value in headers.items():
+            conn.putheader(name, value)
+        conn.endheaders()
+        response = conn.getresponse()
+        return response.status, json.loads(response.read())
+    finally:
+        conn.close()
+
+
+def test_request_without_host_is_allowed(server):
+    assert send_raw(server, "GET", "/health", {}, skip_host=True)[0] == 200
+
+
+def test_oversized_body_gets_413_without_being_read(server):
+    # No body is sent: reading it would time out instead of answering.
+    status, payload = send_raw(server, "POST", "/packets", {"Content-Length": str(MAX_BODY_BYTES + 1)})
+    assert (status, payload["error"]) == (413, f"request body too large (max {MAX_BODY_BYTES} bytes)")
+
+
+def test_invalid_content_length_gets_400(server):
+    status, payload = send_raw(server, "POST", "/packets", {"Content-Length": "abc"})
+    assert (status, payload["error"]) == (400, "invalid Content-Length")
+
+
+def test_chunked_body_gets_411(server):
+    status, payload = send_raw(server, "POST", "/packets", {"Transfer-Encoding": "chunked"})
+    assert (status, payload["error"]) == (411, "Content-Length required")
+
+
+def test_refused_request_with_large_body_is_answered_without_reading_it(server):
+    headers = {"Content-Length": str(REFUSED_DRAIN_BYTES + 1), "Origin": "https://evil.example"}
+    status, payload = send_raw(server, "POST", "/packets", headers)
+    assert (status, payload["error"]) == (403, "origin not allowed: https://evil.example")
 
 
 def test_responses_carry_no_cors_header(server):
@@ -929,7 +1022,7 @@ def test_burst_choose_enqueues_pending_history_and_drains(server):
     assert status == 200
     packet = json.loads(body)["packet"]
 
-    status, _, body = request(server_url(server, "/history/pending"))
+    status, _, body = request(server_url(server, "/history/pending"), data=b"{}", method="POST")
     assert status == 200
     payload = json.loads(body)
     assert payload["ok"] is True
@@ -943,10 +1036,16 @@ def test_burst_choose_enqueues_pending_history_and_drains(server):
         }
     ]
 
-    # The endpoint drains the queue: a second GET is empty.
-    status, _, body = request(server_url(server, "/history/pending"))
+    # The endpoint drains the queue: a second POST is empty.
+    status, _, body = request(server_url(server, "/history/pending"), data=b"{}", method="POST")
     assert status == 200
     assert json.loads(body) == {"ok": True, "entries": []}
+
+
+def test_history_drain_is_post_only(server):
+    status, _, body = request(server_url(server, "/history/pending"))
+    assert status == 404
+    assert json.loads(body) == {"ok": False, "error": "not found"}
 
 
 def test_burst_picker_meta_omits_photoshop_flag(server):

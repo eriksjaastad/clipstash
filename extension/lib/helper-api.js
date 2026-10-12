@@ -8,12 +8,8 @@
 globalThis.ClipStashHelper = (() => {
   const BASE = "http://127.0.0.1:8787";
 
-  // fetchJson and postJson return the helper's JSON body when it answers ok,
+  // postJson returns the helper's JSON body when it answers ok,
   // otherwise { ok: false, error }, including when it can't be reached.
-  function fetchJson(path, init) {
-    return answer(() => fetch(`${BASE}${path}`, init));
-  }
-
   function postJson(path, payload) {
     return answer(() => post(path, payload));
   }
@@ -46,5 +42,5 @@ globalThis.ClipStashHelper = (() => {
     return body;
   }
 
-  return { BASE, fetchJson, postJson, post, readJson };
+  return { BASE, postJson, post, readJson };
 })();

@@ -2,7 +2,21 @@
 
 Binds 127.0.0.1 only and sends no CORS headers, so web pages cannot read its
 responses; the extension (via host_permissions) and the helper's own picker
-page are the only browser callers. Endpoints:
+page are the only browser callers. POST and PUT are refused with 403 when an
+``Origin`` header is present and is neither ``chrome-extension://…`` nor the
+helper's own loopback origin (``http://127.0.0.1:<port>``, ``localhost`` or
+``[::1]``), so a web page cannot change state. No ``Origin`` (curl, the CLI)
+is allowed. Every request must also name the helper itself in ``Host``
+(``127.0.0.1``, ``localhost`` or ``[::1]`` on the serving port), else 403, so a
+DNS-rebound web page cannot read packets; a request with no ``Host`` (an
+HTTP/1.0 client, never a browser) is allowed. Any ``chrome-extension://`` origin
+passes: the unpacked extension's ID depends on its install path (no manifest
+``key``), and an installed extension already holds broad browser power.
+A body over ``MAX_BODY_BYTES`` gets 413 unread; a refused request's body is
+read only when it is small, so the client still sees the 403. A body must
+come with a plain ``Content-Length``: ``Transfer-Encoding`` gets 411 and a
+non-numeric or negative length gets 400.
+Endpoints:
 
   GET  /health              -> {"ok": true, "version": "..."}
   GET  /config              -> {"ok": true, "packet_root": "...", "default_root": "...", "config_path": "..."}
@@ -20,7 +34,8 @@ page are the only browser callers. Endpoints:
   GET  /picker/<id>         -> HTML grid of burst frames
   GET  /picker/<id>/frame/N -> PNG for frame N
   POST /picker/<id>/choose  -> write chosen frame as a normal packet
-  GET  /history/pending     -> drain pending burst-chosen history entries
+  POST /history/pending     -> drain pending burst-chosen history entries (POST:
+                               it empties the queue)
 
 Both ``POST /packets`` and ``POST /bursts`` accept an optional ``crop_rect``
 request field (JSON object, or JSON string in a multipart ``POST /packets``):
@@ -326,6 +341,12 @@ class _UnsupportedContentType(Exception):
     """The request body is neither JSON nor a form the route accepts (415)."""
 
 
+#: Largest request body read. A 15-frame 4K burst of base64 PNGs is about 370 MB.
+MAX_BODY_BYTES = 512 * 1024 * 1024
+#: A refused request's body is drained only up to this size, so its 403 arrives cleanly.
+REFUSED_DRAIN_BYTES = 64 * 1024
+
+
 class ClipStashHandler(BaseHTTPRequestHandler):
     server_version = "clipstashd/" + __version__
     root: str | None = None
@@ -341,7 +362,6 @@ class ClipStashHandler(BaseHTTPRequestHandler):
         ("GET", r"/config", "_serve_config"),
         ("GET", r"/packets", "_serve_packets"),
         ("GET", r"/export\.csv", "_serve_export"),
-        ("GET", r"/history/pending", "_serve_pending_history"),
         ("GET", r"/picker/([^/]+)", "_serve_picker"),
         ("GET", r"/picker/([^/]+)/frame/(\d+)", "_serve_frame"),
         ("POST", r"/packets", "_create_packet"),
@@ -349,6 +369,7 @@ class ClipStashHandler(BaseHTTPRequestHandler):
         ("POST", r"/bursts/ffmpeg", "_create_ffmpeg_burst_session"),
         ("POST", r"/packets/([^/]+)/place-photoshop", "_place_packet_in_photoshop"),
         ("POST", r"/picker/([^/]+)/choose", "_choose_burst_frame"),
+        ("POST", r"/history/pending", "_drain_pending_history"),
         ("PUT", r"/config", "_update_config"),
     )
 
@@ -383,11 +404,13 @@ class ClipStashHandler(BaseHTTPRequestHandler):
     def _send_json(self, payload: Any, status: int = 200) -> None:
         self._send(status, json.dumps(payload).encode("utf-8"), JSON)
 
-    def _read_body(self) -> bytes:
-        length = int(self.headers.get("Content-Length") or 0)
-        if length <= 0:
-            return b""
-        return self.rfile.read(length)
+    def _content_length(self) -> int:
+        """The declared body length: 0 when absent, -1 when not a non-negative integer."""
+        raw = self.headers.get("Content-Length", "0").strip()
+        return int(raw) if raw.isascii() and raw.isdigit() else -1
+
+    def _read_body(self, length: int) -> bytes:
+        return self.rfile.read(length) if length > 0 else b""
 
     def _json_body(self) -> Any:
         return json.loads(self.body.decode("utf-8") or "{}")
@@ -402,10 +425,45 @@ class ClipStashHandler(BaseHTTPRequestHandler):
             return self._json_body(), None
         raise _UnsupportedContentType("expected JSON or multipart/form-data")
 
+    def _own_hosts(self) -> set[str]:
+        """This helper's own ``host:port`` names, as Host and Origin carry them."""
+        port = self.server.server_address[1]
+        return {f"{host}:{port}" for host in ("127.0.0.1", "localhost", "[::1]")}
+
+    def _refusal(self, method: str) -> str | None:
+        """Why the request is refused, or None. Host is checked on every request;
+        Origin only on state changes (no Origin, the extension or the helper's
+        own page is allowed)."""
+        host = self.headers.get("Host")
+        if host is not None and host not in self._own_hosts():
+            return f"host not allowed: {host}"
+        origin = self.headers.get("Origin")
+        if method == "GET" or origin is None or origin.startswith("chrome-extension://"):
+            return None
+        if origin in {f"http://{host}" for host in self._own_hosts()}:
+            return None
+        return f"origin not allowed: {origin}"
+
     def _dispatch(self, method: str) -> None:
         path = urlparse(self.path).path
+        length = 0 if method == "GET" else self._content_length()
+        refusal = self._refusal(method)
+        if refusal:
+            if 0 <= length <= REFUSED_DRAIN_BYTES:
+                self._read_body(length)
+            self._send_json({"ok": False, "error": refusal}, 403)
+            return
+        if method != "GET" and "Transfer-Encoding" in self.headers:
+            self._send_json({"ok": False, "error": "Content-Length required"}, 411)
+            return
+        if length < 0:
+            self._send_json({"ok": False, "error": "invalid Content-Length"}, 400)
+            return
+        if length > MAX_BODY_BYTES:
+            self._send_json({"ok": False, "error": f"request body too large (max {MAX_BODY_BYTES} bytes)"}, 413)
+            return
         if method != "GET":
-            self.body = self._read_body()
+            self.body = self._read_body(length)
         try:
             for route_method, pattern, handler in self.ROUTES:
                 match = re.fullmatch(pattern, path) if route_method == method else None
@@ -426,7 +484,7 @@ class ClipStashHandler(BaseHTTPRequestHandler):
         with self.pending_history_lock:
             self.pending_history.append(entry)
 
-    def _serve_pending_history(self) -> None:
+    def _drain_pending_history(self) -> None:
         with self.pending_history_lock:
             entries = list(self.pending_history)
             self.pending_history.clear()
