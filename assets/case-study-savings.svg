@@ -34,7 +34,7 @@
   <line x1="420" y1="125" x2="500" y2="120" stroke="#111" stroke-width="2.5"/>
   <line x1="420" y1="155" x2="402" y2="190" stroke="#111" stroke-width="2.5"/>
   <line x1="420" y1="155" x2="438" y2="190" stroke="#111" stroke-width="2.5"/>
-  <text x="500" y="198" text-anchor="middle" fill="#111" font-family="Helvetica, Arial, sans-serif" font-size="12">hotkey — paperwork done</text>
+  <text x="500" y="198" text-anchor="middle" fill="#111" font-family="Helvetica, Arial, sans-serif" font-size="12">hotkey: paperwork done</text>
 
   <!-- Bottom label -->
   <text x="24" y="250" fill="#111" font-family="Helvetica, Arial, sans-serif" font-size="16" font-weight="700">Without the tool</text>
